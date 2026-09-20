@@ -1,9 +1,9 @@
--- Snake Animator 5.1 completo: pronto para hospedar como arquivo Lua raw.
+-- Snake Animator V1 completo: pronto para hospedar como arquivo Lua raw.
 if not game:IsLoaded() then game.Loaded:Wait() end
 while not game:GetService("Players").LocalPlayer do task.wait() end
 game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
--- SNAKE ANIMATOR 5.1 / editor visual local para Roblox
--- Fonte completa: hospede SnakeAnimatorV5_1.lua como Raw no seu GitHub.
+-- SNAKE ANIMATOR V1 / editor visual local para Roblox
+-- Fonte completa: hospede SnakeAnimatorV1.lua como Raw no seu GitHub.
 -- Execute com seu executor dentro do seu projeto Studio Lite.
 -- O editor nao depende de readfile nem de modulos externos.
 -- Exporte o projeto JSON antes de encerrar o Play.
@@ -19,13 +19,15 @@ local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
 local SoundService = game:GetService("SoundService")
 Snake.allowed = {}
-for name in string.gmatch("ShirtTemplate PantsTemplate Graphic HeadColor3 LeftArmColor3 RightArmColor3 LeftLegColor3 RightLegColor3 TorsoColor3 ModelScale Pivot ToolPivot CFrame C0 Transform Size Color Color3 Transparency Reflectance TextureID Texture TextureId Scale Offset Enabled Brightness Range Angle Shadows Rate Lifetime Speed LightEmission LightInfluence Rotation RotSpeed Acceleration Drag TimeScale SpreadAngle Width0 Width1 CurveSize0 CurveSize1 TextureSpeed MinLength WidthScale Heat SecondaryColor Opacity RiseVelocity SparkleColor FieldOfView Volume PlaybackSpeed ClockTime ExposureCompensation FogStart FogEnd FogColor Ambient OutdoorAmbient Density Haze Glare Decay Contrast Saturation TintColor Intensity Threshold FocusDistance InFocusRadius NearIntensity FarIntensity", "%S+") do
+for name in string.gmatch("ShirtTemplate PantsTemplate Graphic HeadColor3 LeftArmColor3 RightArmColor3 LeftLegColor3 RightLegColor3 TorsoColor3 CornerRadius Thickness GroupTransparency GroupColor3 CanvasPosition AspectRatio ClipsDescendants Position AnchorPoint Visible Text TextSize TextTransparency TextColor3 BackgroundTransparency BackgroundColor3 Image ImageTransparency ImageColor3 SoundId Looped ModelScale Pivot ToolPivot CFrame C0 Transform Size Color Color3 Transparency Reflectance TextureID Texture TextureId Scale Offset Enabled Brightness Range Angle Shadows Rate Lifetime Speed LightEmission LightInfluence Rotation RotSpeed Acceleration Drag TimeScale SpreadAngle Width0 Width1 CurveSize0 CurveSize1 TextureSpeed MinLength WidthScale Heat SecondaryColor Opacity RiseVelocity SparkleColor FieldOfView Volume PlaybackSpeed ClockTime ExposureCompensation FogStart FogEnd FogColor Ambient OutdoorAmbient Density Haze Glare Decay Contrast Saturation TintColor Intensity Threshold FocusDistance InFocusRadius NearIntensity FarIntensity", "%S+") do
 Snake.allowed[name] = true
 end
 function Snake.pack(v)
 local kind = typeof(v)
 if kind == "number" or kind == "boolean" or kind == "string" then return {kind=kind, data=v} end
 if kind == "CFrame" then return {kind=kind, data={v:GetComponents()}} end
+if kind == "UDim2" then return {kind=kind,data={v.X.Scale,v.X.Offset,v.Y.Scale,v.Y.Offset}} end
+if kind == "UDim" then return {kind=kind,data={v.Scale,v.Offset}} end
 if kind == "Vector3" then return {kind=kind, data={v.X,v.Y,v.Z}} end
 if kind == "Vector2" then return {kind=kind, data={v.X,v.Y}} end
 if kind == "Color3" then return {kind=kind, data={v.R,v.G,v.B}} end
@@ -46,6 +48,8 @@ function Snake.unpack(v)
 local k,d=v.kind,v.data
 if k=="number" or k=="boolean" or k=="string" then return d end
 if k=="CFrame" then return CFrame.new(table.unpack(d)) end
+if k=="UDim2" then return UDim2.new(d[1],d[2],d[3],d[4]) end
+if k=="UDim" then return UDim.new(d[1],d[2]) end
 if k=="Vector3" then return Vector3.new(d[1],d[2],d[3]) end
 if k=="Vector2" then return Vector2.new(d[1],d[2]) end
 if k=="Color3" then return Color3.new(d[1],d[2],d[3]) end
@@ -81,11 +85,15 @@ root=p.Character; rootName="Character"; userId=p.UserId; break
 end
 end
 if not root then
+local pg=Players.LocalPlayer and Players.LocalPlayer:FindFirstChild("PlayerGui")
+if pg and (obj==pg or obj:IsDescendantOf(pg)) then root=pg;rootName="PlayerGui" end
+end
+if not root then
 for _,pair in ipairs({{Workspace,"Workspace"},{Lighting,"Lighting"},{SoundService,"SoundService"}}) do
 if obj==pair[1] or obj:IsDescendantOf(pair[1]) then root=pair[1];rootName=pair[2];break end
 end
 end
-assert(root,"Use objetos em Workspace, Lighting ou SoundService")
+assert(root,"Use objetos em Workspace, Lighting, SoundService ou PlayerGui")
 local path={}
 local node=obj
 while node~=root do table.insert(path,1,segment(node));node=node.Parent end
@@ -94,6 +102,7 @@ end
 function Snake.resolve(loc)
 local node
 if loc.root=="Camera" then return Workspace.CurrentCamera end
+if loc.root=="PlayerGui" then node=Players.LocalPlayer and Players.LocalPlayer:FindFirstChild("PlayerGui") end
 if loc.root=="Character" then
 local p=Players:GetPlayerByUserId(loc.userId or 0)
 node=p and p.Character
@@ -169,6 +178,8 @@ local function mix(a,b,u)
 local kind=typeof(a)
 if kind~=typeof(b) then return a end
 if kind=="number" then return a+(b-a)*u end
+if kind=="UDim2" then return UDim2.new(a.X.Scale+(b.X.Scale-a.X.Scale)*u,a.X.Offset+(b.X.Offset-a.X.Offset)*u,a.Y.Scale+(b.Y.Scale-a.Y.Scale)*u,a.Y.Offset+(b.Y.Offset-a.Y.Offset)*u) end
+if kind=="UDim" then return UDim.new(a.Scale+(b.Scale-a.Scale)*u,a.Offset+(b.Offset-a.Offset)*u) end
 if kind=="CFrame" or kind=="Vector3" or kind=="Vector2" or kind=="Color3" then return a:Lerp(b,u) end
 if kind=="NumberRange" then return NumberRange.new(a.Min+(b.Min-a.Min)*u,a.Max+(b.Max-a.Max)*u) end
 if kind=="NumberSequence" or kind=="ColorSequence" then
@@ -353,7 +364,7 @@ end
 end
 end
 function Snake.validate(project)
-assert(type(project)=="table" and (project.version==1 or project.version==2 or project.version==3 or project.version==4 or project.version==5),"Versao de projeto invalida")
+assert(type(project)=="table" and (project.version==1 or project.version==2 or project.version==3 or project.version==4 or project.version==5 or project.version==6),"Versao de projeto invalida")
 assert(type(project.duration)=="number" and project.duration>0 and project.duration<=600,"Duracao: 0.01 a 600 segundos")
 assert(type(project.tracks)=="table" and #project.tracks<=512,"Limite: 512 faixas")
 local scales={}
@@ -390,6 +401,10 @@ if expected=="number" then assert(tangent==tangent and math.abs(tangent)<1e9,"Ta
 else for _,x in ipairs(key[field].data) do assert(type(x)=="number" and x==x and math.abs(x)<1e9,"Tangente inválida") end end
 end
 end
+if key.value.kind=="UDim2" or key.value.kind=="UDim" then
+assert(type(key.value.data)=="table" and #key.value.data==(key.value.kind=="UDim2" and 4 or 2),"Dimensão de GUI inválida")
+for _,n in ipairs(key.value.data) do assert(type(n)=="number" and n==n and math.abs(n)<1e9,"Componente de GUI inválido") end
+end
 local value=Snake.unpack(key.value)
 if track.property=="ModelScale" then assert(type(value)=="number" and value>=.01 and value<=100,"Key de escala inválida") end
 if typeof(value)=="number" then assert(value==value and math.abs(value)<1e12,"Numero invalido") end
@@ -422,6 +437,7 @@ assert(type(v)=="table" and #v==3,"Vetor IK invalido")
 for _,n in ipairs(v) do assert(type(n)=="number" and n==n and math.abs(n)<1e9,"Numero IK invalido") end
 end
 end
+Snake.validateCinema(project.cinema,project.duration)
 Snake.validateBody(project.body,project.duration)
 Snake.validateAssist(project.assist,project.duration)
 return project
@@ -490,56 +506,300 @@ if e.originalTransform then pcall(function() e.obj.Transform=e.originalTransform
 end
 end
 end
-function Snake.play(project,options)
-options=options or {}
-Snake.validate(project)
-local compiled=Snake.compile(project)
-local duration=project.duration
-local looping=options.Loop
-if looping==nil then looping=project.loop==true end
-local start=options.StartAt or Workspace:GetServerTimeNow()
-local camera=Workspace.CurrentCamera
-local cameraState=camera and {type=camera.CameraType,subject=camera.CameraSubject,cf=camera.CFrame,fov=camera.FieldOfView}
-local hasCamera=false
-for _,e in ipairs(compiled) do if e.track.target.root=="Camera" and #e.track.keys>0 then hasCamera=true end end
-local lateFinished=not looping and Workspace:GetServerTimeNow()-start>=duration
-local cameraAllowed=hasCamera and not lateFinished
-local stopped=false
-local connection
-local controller={}
-local function restoreCamera()
-if cameraAllowed and camera and cameraState then
+do
+local function number(v,a,b) assert(type(v)=="number" and v==v and v>=a and v<=b,"Número inválido em Cutscene") end
+local function text(v,max) assert(type(v)=="string" and #v<=max,"Texto inválido em Cutscene") end
+local function locator(v)
+assert(type(v)=="table" and type(v.path)=="table" and #v.path<=64,"Alvo de Cutscene inválido")
+assert(({Workspace=true,PlayerGui=true,Lighting=true,SoundService=true,Camera=true,Character=true})[v.root],"Raiz de Cutscene inválida")
+for _,p in ipairs(v.path) do text(p.name,256);text(p.class,80);number(p.index or 1,1,1000000) end
+end
+local function packed(v,kind,count)
+assert(type(v)=="table" and v.kind==kind and type(v.data)=="table" and #v.data==count,"Pose de câmera inválida")
+for _,n in ipairs(v.data) do number(n,-1e8,1e8) end
+end
+function Snake.validateCinema(c,duration)
+if c==nil then return end
+assert(type(c)=="table" and c.version==1,"Formato de Cutscene inválido")
+for _,k in ipairs({"enabled","allowSkip","lockInput","restore"}) do assert(type(c[k])=="boolean","Opção de Cutscene inválida") end
+number(c.letterbox,0,.25)
+assert(type(c.shots)=="table" and #c.shots<=64 and type(c.events)=="table" and #c.events<=256,"Limites: 64 planos / 256 cues")
+table.sort(c.shots,function(a,b) return a.start<b.start end)
+local ids={};local finish=-1
+for _,s in ipairs(c.shots) do
+text(s.id,80);assert(not ids[s.id],"ID repetido");ids[s.id]=true;text(s.name,100)
+number(s.start,0,duration);number(s.finish,s.start+.001,duration);assert(s.start>=finish-1e-7,"Planos de câmera sobrepostos");finish=s.finish
+packed(s.from,"CFrame",12);packed(s.to,"CFrame",12);number(s.fov0,1,120);number(s.fov1,1,120)
+assert(({linear=true,smooth=true,smoother=true,hold=true,["in"]=true,out=true,inout=true})[s.ease],"Curva de plano inválida")
+if s.lookAt then locator(s.lookAt) end
+end
+table.sort(c.events,function(a,b) if a.t==b.t then return a.id<b.id end;return a.t<b.t end)
+local fadeFinish=-1;local subtitleFinish=-1
+for _,e in ipairs(c.events) do
+text(e.id,80);assert(not ids[e.id],"ID repetido");ids[e.id]=true;text(e.name,100)
+number(e.t,0,duration);number(e.duration,0,duration-e.t+1e-7)
+if e.kind=="subtitle" then
+number(e.duration,.001,duration);text(e.text,600);text(e.speaker or "",100)
+assert(e.t>=subtitleFinish-1e-7,"Legendas sobrepostas");subtitleFinish=e.t+e.duration
+elseif e.kind=="fade" then
+number(e.duration,.001,duration);number(e.from,0,1);number(e.to,0,1)
+assert(e.t>=fadeFinish-1e-7,"Fades sobrepostos");fadeFinish=e.t+e.duration
+elseif e.kind=="sound" then
+number(e.duration,.001,duration);locator(e.target);number(e.volume,0,3);number(e.rate,.05,4)
+elseif e.kind=="emit" then
+locator(e.target);number(e.count,1,1000);assert(e.count%1==0 and e.duration==0,"Burst precisa de contagem inteira / duração zero")
+elseif e.kind=="marker" then text(e.text,200);assert(e.duration==0,"Marcador precisa de duração zero")
+else error("Tipo de cue não suportado") end
+end
+end
+function Snake.cinemaFrame(c,t)
+if not c or not c.enabled then return nil end
+for i,s in ipairs(c.shots) do
+if t>=s.start and (t<s.finish or i==#c.shots and t==s.finish) then
+local u=Snake.ease(math.clamp((t-s.start)/(s.finish-s.start),0,1),s.ease)
+local cf=Snake.unpack(s.from):Lerp(Snake.unpack(s.to),u)
+if s.lookAt then
 pcall(function()
-camera.CFrame=cameraState.cf;camera.FieldOfView=cameraState.fov
-camera.CameraSubject=cameraState.subject;camera.CameraType=cameraState.type
+local target=Snake.resolve(s.lookAt);local point
+if target and target:IsA("Model") then point=target:GetPivot().Position
+elseif target and target:IsA("BasePart") then point=target.Position
+elseif target and target:IsA("Attachment") then point=target.WorldCFrame.Position end
+if point and (point-cf.Position).Magnitude>.001 then cf=CFrame.lookAt(cf.Position,point) end
 end)
 end
+return cf,s.fov0+(s.fov1-s.fov0)*u,s
 end
-function controller.Stop(restore)
-if stopped then
-if restore then Snake.restore(compiled) end
+end
+end
+function Snake.cinemaOverlay(c,t)
+local subtitle,fade=nil,0
+if not c or not c.enabled then return nil,0 end
+for _,e in ipairs(c.events) do
+if e.kind=="subtitle" and t>=e.t and t<e.t+e.duration then subtitle=e end
+if e.kind=="fade" and t>=e.t then
+local u=math.clamp((t-e.t)/e.duration,0,1);u=u*u*(3-2*u)
+fade=e.from+(e.to-e.from)*u
+end
+end
+return subtitle,fade
+end
+function Snake.cinemaCrossings(c,first,last)
+local result={}
+if c and c.enabled and last>=first then
+for _,e in ipairs(c.events) do if (e.kind=="emit" or e.kind=="marker") and e.t>first and e.t<=last then result[#result+1]=e end end
+end
+return result
+end
+local serial=0
+function Snake.newCinemaSession(c,options)
+if not c or not c.enabled then return nil end
+options=options or {};serial=serial+1
+local S={sounds={},bursts={},closed=false,last=nil,warnings={}};local connections={};local gui,top,bottom,caption,fade,skip
+local action="SnakeCutsceneInput_"..serial
+local function make(class,parent,props)
+local obj=Instance.new(class);for k,v in pairs(props) do obj[k]=v end;obj.Parent=parent;return obj
+end
+local pg=Players.LocalPlayer and Players.LocalPlayer:FindFirstChild("PlayerGui")
+if pg then
+gui=make("ScreenGui",pg,{Name="SnakeCutsceneHUD_"..serial,ResetOnSpawn=false,IgnoreGuiInset=true,DisplayOrder=options.preview and 30 or 60,ZIndexBehavior=Enum.ZIndexBehavior.Sibling})
+gui:SetAttribute("SnakeEditorVisual",true)
+top=make("Frame",gui,{Name="LetterboxTop",Position=UDim2.new(),Size=UDim2.new(1,0,c.letterbox,0),BackgroundColor3=Color3.new(),BorderSizePixel=0,Active=false})
+bottom=make("Frame",gui,{Name="LetterboxBottom",Position=UDim2.new(0,0,1-c.letterbox,0),Size=UDim2.new(1,0,c.letterbox,0),BackgroundColor3=Color3.new(),BorderSizePixel=0,Active=false})
+caption=make("TextLabel",gui,{Name="Subtitle",Position=UDim2.new(.06,0,.73-c.letterbox/2,0),Size=UDim2.new(.88,0,.18,0),BackgroundColor3=Color3.new(),BackgroundTransparency=.35,BorderSizePixel=0,TextColor3=Color3.new(1,1,1),Font=Enum.Font.GothamMedium,TextSize=20,TextWrapped=true,RichText=false,Text="",Visible=false,ZIndex=2})
+fade=make("Frame",gui,{Name="Fade",Size=UDim2.fromScale(1,1),BackgroundColor3=Color3.new(),BackgroundTransparency=1,BorderSizePixel=0,Active=false,ZIndex=3})
+if c.allowSkip and not options.preview then
+skip=make("TextButton",gui,{Name="SkipCutscene",Text="Pular cena",Position=UDim2.new(1,-132,1,-52),Size=UDim2.fromOffset(120,36),BackgroundColor3=Color3.new(.08,.1,.13),TextColor3=Color3.new(1,1,1),Font=Enum.Font.GothamMedium,TextSize=14,ZIndex=4})
+connections[#connections+1]=skip.Activated:Connect(function() if options.onSkip then options.onSkip() end end)
+end
+end
+S.gui=gui
+local context
+if c.lockInput and not options.preview then
+pcall(function()
+context=game:GetService("ContextActionService")
+context:BindActionAtPriority(action,function() return Enum.ContextActionResult.Sink end,false,4500,
+Enum.PlayerActions.CharacterForward,Enum.PlayerActions.CharacterBackward,Enum.PlayerActions.CharacterLeft,Enum.PlayerActions.CharacterRight,Enum.PlayerActions.CharacterJump,
+Enum.UserInputType.MouseButton2,Enum.UserInputType.MouseWheel)
+end)
+end
+local function warning(id,message)
+if not S.warnings[id] then S.warnings[id]=true;warn("Snake Cutscene: "..tostring(message)) end
+end
+local function emit(e)
+if S.closed then return end
+if e.kind=="marker" then
+if options.onMarker then local ok,err=pcall(options.onMarker,e.text,e.id,e.t);if not ok then warning(e.id,err) end end
 return
 end
-stopped=true
+local burst
+local ok,err=pcall(function()
+local source=assert(Snake.resolve(e.target),"Emitter ausente: "..e.name)
+assert(source:IsA("ParticleEmitter"),"Burst requer ParticleEmitter")
+burst=source:Clone();assert(burst,"Emitter não permite Clone")
+burst.Name="SnakeCutsceneBurst";burst.Enabled=false;burst:SetAttribute("SnakeEditorVisual",true);burst.Parent=source.Parent
+burst:Emit(e.count)
+S.bursts[#S.bursts+1]={object=burst,untilTime=Workspace:GetServerTimeNow()+math.min(120,source.Lifetime.Max+.1)}
+end)
+if not ok then if burst then burst:Destroy() end;warning(e.id,err) end
+end
+function S.Step(t,flags)
+if S.closed then return end
+flags=flags or {}
+local subtitle,alpha=Snake.cinemaOverlay(c,t)
+if gui then
+caption.Visible=subtitle~=nil
+caption.Text=subtitle and ((subtitle.speaker and subtitle.speaker~="" and subtitle.speaker.."\n" or "")..subtitle.text) or ""
+fade.BackgroundTransparency=1-alpha
+end
+if flags.fire then
+local from=S.last
+if flags.looped and flags.looped>0 then
+if flags.looped==1 and from then for _,e in ipairs(Snake.cinemaCrossings(c,from,options.duration or t)) do emit(e) end end
+from=-1e-8
+elseif from==nil then from=t<=.05 and -1e-8 or t-.001 end
+for _,e in ipairs(Snake.cinemaCrossings(c,from,t)) do emit(e) end
+end
+if S.closed then return end
+S.last=t
+if flags.looped and flags.looped>0 then for _,entry in pairs(S.sounds) do entry.object:Destroy() end;S.sounds={} end
+local active={}
+for _,e in ipairs(c.events) do if e.kind=="sound" and t>=e.t and t<e.t+e.duration then
+active[e.id]=true
+local entry=S.sounds[e.id]
+if flags.audio then
+local sound
+local ok,err=pcall(function()
+local source=assert(Snake.resolve(e.target),"Sound ausente: "..e.name);assert(source:IsA("Sound"),"Cue requer Sound")
+if not entry then
+sound=source:Clone();assert(sound,"Sound não permite Clone");sound.Name="SnakeCutsceneSound";sound.Looped=false;sound.PlayOnRemove=false;sound:Stop();sound:SetAttribute("SnakeEditorVisual",true)
+sound.Parent=source.Parent;entry={object=sound,running=false};S.sounds[e.id]=entry
+end
+sound=entry.object
+sound.Volume=math.clamp(source.Volume*e.volume,0,10);sound.PlaybackSpeed=e.rate*(flags.rate or 1)
+if not entry.running or flags.seek then sound:Play();entry.running=true;entry.positioned=false end
+local pos=(t-e.t)*e.rate
+if sound.TimeLength>0 then
+pos=math.min(pos,math.max(0,sound.TimeLength-.01))
+if not entry.positioned or math.abs(sound.TimePosition-pos)>.2 then sound.TimePosition=pos;entry.positioned=true end
+end
+end)
+if not ok then if sound and not entry then sound:Destroy() end;warning(e.id,err) end
+elseif entry and entry.running then entry.object:Pause();entry.running=false;entry.positioned=false end
+end end
+for id,entry in pairs(S.sounds) do if not active[id] then entry.object:Destroy();S.sounds[id]=nil end end
+for i=#S.bursts,1,-1 do if Workspace:GetServerTimeNow()>=S.bursts[i].untilTime then S.bursts[i].object:Destroy();table.remove(S.bursts,i) end end
+end
+function S.Close()
+if S.closed then return end;S.closed=true
+if context then pcall(function() context:UnbindAction(action) end) end
+for _,connection in ipairs(connections) do connection:Disconnect() end
+for _,entry in pairs(S.sounds) do entry.object:Destroy() end;S.sounds={}
+for _,entry in ipairs(S.bursts) do entry.object:Destroy() end;S.bursts={}
+if gui then gui:Destroy() end
+end
+return S
+end
+end
+function Snake.play(project,options)
+options=options or {};Snake.validate(project)
+local compiled=Snake.compile(project);local duration=project.duration
+local looping=options.Loop;if looping==nil then looping=project.loop==true end
+local c=project.cinema and project.cinema.enabled and project.cinema or nil
+local hasCamera=false
+for _,e in ipairs(compiled) do if e.track.target.root=="Camera" and #e.track.keys>0 then hasCamera=true end end
+local ownsPresentation=hasCamera or c~=nil
+local start=options.StartAt or Workspace:GetServerTimeNow();local offset=0;local rate=options.Rate or 1
+assert(type(rate)=="number" and rate==rate and rate>=.05 and rate<=4,"Velocidade: 0.05–4")
+assert(type(start)=="number" and start==start and math.abs(start)<1e16,"StartAt inválido")
+local paused,stopped=false,false;local connection,binding,session
+local cameras={};local cycle=nil;local controller={}
+local initialLate=not looping and (Workspace:GetServerTimeNow()-start)*rate>=duration
+if ownsPresentation and not initialLate then
+if Snake._presentation then Snake._presentation.Stop(false) end
+Snake._presentation=controller
+end
+local function ownCamera()
+local camera=Workspace.CurrentCamera
+if camera and not cameras[camera] then cameras[camera]={cf=camera.CFrame,focus=camera.Focus,fov=camera.FieldOfView,kind=camera.CameraType,subject=camera.CameraSubject} end
+return camera
+end
+local function restoreCamera()
+for camera,state in pairs(cameras) do if camera.Parent then pcall(function()
+camera.CFrame=state.cf;camera.Focus=state.focus;camera.FieldOfView=state.fov;camera.CameraSubject=state.subject;camera.CameraType=state.kind
+end) end end;cameras={}
+end
+local function rawTime() return paused and offset or offset+(Workspace:GetServerTimeNow()-start)*rate end
+local function sceneTime(t) return looping and t%duration or math.clamp(t,0,duration) end
+local function render(t,fire)
+local shot,fov,shotInfo=Snake.cinemaFrame(c,t)
+local allowed=not initialLate and (hasCamera or shot~=nil)
+local camera=allowed and ownCamera() or nil
+if not allowed and next(cameras) then restoreCamera() end
+Snake.apply(compiled,t,allowed)
+if shotInfo and shotInfo.lookAt then shot,fov=Snake.cinemaFrame(c,t) end
+if camera and shot then camera.CameraType=Enum.CameraType.Scriptable;camera.CFrame=shot;camera.FieldOfView=fov;camera.Focus=shot*CFrame.new(0,0,-10) end
+if c and not initialLate then
+if not session then session=Snake.newCinemaSession(c,{duration=duration,onSkip=function() controller.Skip() end,onMarker=options.OnMarker}) end
+local currentCycle=looping and math.floor(math.max(0,rawTime())/duration) or 0
+session.Step(t,{fire=fire and not paused,audio=not paused,seek=not fire,rate=rate,looped=cycle and currentCycle-cycle or 0})
+cycle=currentCycle
+end
+end
+local function restoreObjects()
+for _,entry in ipairs(compiled) do if entry.track.target.root~="Camera" then Snake.restore({entry}) end end
+end
+local function finish(restore,reason)
+if stopped then if restore then restoreObjects() end;return end
+offset=math.max(0,rawTime());paused=true;stopped=true
 if connection then connection:Disconnect() end
-if restore then Snake.restore(compiled) end
+if binding then pcall(function() RunService:UnbindFromRenderStep(binding) end) end
+if session then session.Close() end
+if restore then restoreObjects() end
 restoreCamera()
+if Snake._presentation==controller then Snake._presentation=nil end
+if options.OnFinished then local ok,err=pcall(options.OnFinished,reason);if not ok then warn("Snake Animator OnFinished: "..tostring(err)) end end
+end
+function controller.Stop(restore) finish(restore==true,"stopped") end
+function controller.Skip() finish(c and c.restore==true,"skipped") end
+function controller.GetTime() return sceneTime(math.max(0,rawTime())) end
+function controller.Pause()
+if stopped or paused then return end
+offset=math.max(0,rawTime());paused=true;render(sceneTime(offset),false)
+end
+function controller.Resume()
+if stopped or not paused then return end
+start=Workspace:GetServerTimeNow();paused=false
+end
+function controller.Seek(t)
+assert(type(t)=="number" and t==t and t>=0 and t<=duration,"Seek fora da cena")
+if stopped then return end
+offset=t;start=Workspace:GetServerTimeNow();initialLate=false;cycle=nil;render(sceneTime(offset),false)
+end
+function controller.SetRate(value)
+assert(type(value)=="number" and value==value and value>=.05 and value<=4,"Velocidade: 0.05–4")
+if stopped then return end
+offset=rawTime();start=Workspace:GetServerTimeNow();rate=value
 end
 local function step()
-local elapsed=Workspace:GetServerTimeNow()-start
-if elapsed<0 then return end
-local t=looping and (elapsed%duration) or math.min(elapsed,duration)
-Snake.apply(compiled,t,cameraAllowed)
-if not looping and elapsed>=duration then controller.Stop(options.RestoreOnFinish==true) end
+if stopped then return end
+local elapsed=rawTime();if elapsed<0 then return end
+local ok,err=pcall(render,sceneTime(elapsed),true)
+if not ok then warn("Snake Animator playback: "..tostring(err));finish(true,"error");return end
+if not paused and not looping and elapsed>=duration then finish(options.RestoreOnFinish==true or c and c.restore==true,"completed") end
 end
-connection=(RunService:IsClient() and RunService.RenderStepped or RunService.Heartbeat):Connect(step)
+if hasCamera or c and #c.shots>0 then
+Snake._playSerial=(Snake._playSerial or 0)+1;local name="SnakeCutscenePlayback_"..Snake._playSerial
+local ok=pcall(function() RunService:BindToRenderStep(name,2100,step) end)
+if ok then binding=name end
+end
+if not binding then connection=(RunService:IsClient() and RunService.RenderStepped or RunService.Heartbeat):Connect(step) end
 step()
 return controller
 end
 ]=]
 
 local SERVER_PREFIX = [=[
--- Snake Animator 5.0 | Script em ServerScriptService
+-- Snake Animator V1 (formato de projeto 6) | Script em ServerScriptService
 -- Requer SnakeAnimatorReceiver (LocalScript) em StarterPlayerScripts.
 -- Servidor coordena; clientes renderizam. Nao controla hitboxes/fisica no servidor.
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -621,6 +881,11 @@ bus.OnClientEvent:Connect(function(action,packet)
             for _,tr in ipairs(packet.project.tracks or {}) do
                 if not Snake.resolve(tr.target) then missing=true;break end
             end
+            local cine=packet.project.cinema
+            if cine and cine.enabled then
+                for _,s in ipairs(cine.shots or {}) do if s.lookAt and not Snake.resolve(s.lookAt) then missing=true;break end end
+                for _,e in ipairs(cine.events or {}) do if e.target and not Snake.resolve(e.target) then missing=true;break end end
+            end
             if not missing or os.clock()>=deadline then break end
             task.wait(.1)
         until false
@@ -632,7 +897,7 @@ end)
 bus:FireServer("ready")
 ]=]
 
--- Snake Animator 5.0 | Runtime compartilhado, incorporado aos scripts exportados.
+-- Snake Animator V1 (formato de projeto 5) | Runtime compartilhado, incorporado aos scripts exportados.
 -- Este arquivo, isoladamente, nao precisa ser instalado.
 local Snake = {}
 local Players = game:GetService("Players")
@@ -643,7 +908,7 @@ local Lighting = game:GetService("Lighting")
 local SoundService = game:GetService("SoundService")
 
 Snake.allowed = {}
-for name in string.gmatch("ShirtTemplate PantsTemplate Graphic HeadColor3 LeftArmColor3 RightArmColor3 LeftLegColor3 RightLegColor3 TorsoColor3 ModelScale Pivot ToolPivot CFrame C0 Transform Size Color Color3 Transparency Reflectance TextureID Texture TextureId Scale Offset Enabled Brightness Range Angle Shadows Rate Lifetime Speed LightEmission LightInfluence Rotation RotSpeed Acceleration Drag TimeScale SpreadAngle Width0 Width1 CurveSize0 CurveSize1 TextureSpeed MinLength WidthScale Heat SecondaryColor Opacity RiseVelocity SparkleColor FieldOfView Volume PlaybackSpeed ClockTime ExposureCompensation FogStart FogEnd FogColor Ambient OutdoorAmbient Density Haze Glare Decay Contrast Saturation TintColor Intensity Threshold FocusDistance InFocusRadius NearIntensity FarIntensity", "%S+") do
+for name in string.gmatch("ShirtTemplate PantsTemplate Graphic HeadColor3 LeftArmColor3 RightArmColor3 LeftLegColor3 RightLegColor3 TorsoColor3 CornerRadius Thickness GroupTransparency GroupColor3 CanvasPosition AspectRatio ClipsDescendants Position AnchorPoint Visible Text TextSize TextTransparency TextColor3 BackgroundTransparency BackgroundColor3 Image ImageTransparency ImageColor3 SoundId Looped ModelScale Pivot ToolPivot CFrame C0 Transform Size Color Color3 Transparency Reflectance TextureID Texture TextureId Scale Offset Enabled Brightness Range Angle Shadows Rate Lifetime Speed LightEmission LightInfluence Rotation RotSpeed Acceleration Drag TimeScale SpreadAngle Width0 Width1 CurveSize0 CurveSize1 TextureSpeed MinLength WidthScale Heat SecondaryColor Opacity RiseVelocity SparkleColor FieldOfView Volume PlaybackSpeed ClockTime ExposureCompensation FogStart FogEnd FogColor Ambient OutdoorAmbient Density Haze Glare Decay Contrast Saturation TintColor Intensity Threshold FocusDistance InFocusRadius NearIntensity FarIntensity", "%S+") do
     Snake.allowed[name] = true
 end
 
@@ -651,6 +916,8 @@ function Snake.pack(v)
     local kind = typeof(v)
     if kind == "number" or kind == "boolean" or kind == "string" then return {kind=kind, data=v} end
     if kind == "CFrame" then return {kind=kind, data={v:GetComponents()}} end
+    if kind == "UDim2" then return {kind=kind,data={v.X.Scale,v.X.Offset,v.Y.Scale,v.Y.Offset}} end
+    if kind == "UDim" then return {kind=kind,data={v.Scale,v.Offset}} end
     if kind == "Vector3" then return {kind=kind, data={v.X,v.Y,v.Z}} end
     if kind == "Vector2" then return {kind=kind, data={v.X,v.Y}} end
     if kind == "Color3" then return {kind=kind, data={v.R,v.G,v.B}} end
@@ -672,6 +939,8 @@ function Snake.unpack(v)
     local k,d=v.kind,v.data
     if k=="number" or k=="boolean" or k=="string" then return d end
     if k=="CFrame" then return CFrame.new(table.unpack(d)) end
+    if k=="UDim2" then return UDim2.new(d[1],d[2],d[3],d[4]) end
+    if k=="UDim" then return UDim.new(d[1],d[2]) end
     if k=="Vector3" then return Vector3.new(d[1],d[2],d[3]) end
     if k=="Vector2" then return Vector2.new(d[1],d[2]) end
     if k=="Color3" then return Color3.new(d[1],d[2],d[3]) end
@@ -708,11 +977,15 @@ function Snake.locate(obj)
         end
     end
     if not root then
+        local pg=Players.LocalPlayer and Players.LocalPlayer:FindFirstChild("PlayerGui")
+        if pg and (obj==pg or obj:IsDescendantOf(pg)) then root=pg;rootName="PlayerGui" end
+    end
+    if not root then
         for _,pair in ipairs({{Workspace,"Workspace"},{Lighting,"Lighting"},{SoundService,"SoundService"}}) do
             if obj==pair[1] or obj:IsDescendantOf(pair[1]) then root=pair[1];rootName=pair[2];break end
         end
     end
-    assert(root,"Use objetos em Workspace, Lighting ou SoundService")
+    assert(root,"Use objetos em Workspace, Lighting, SoundService ou PlayerGui")
     local path={}
     local node=obj
     while node~=root do table.insert(path,1,segment(node));node=node.Parent end
@@ -721,6 +994,7 @@ end
 function Snake.resolve(loc)
     local node
     if loc.root=="Camera" then return Workspace.CurrentCamera end
+    if loc.root=="PlayerGui" then node=Players.LocalPlayer and Players.LocalPlayer:FindFirstChild("PlayerGui") end
     if loc.root=="Character" then
         local p=Players:GetPlayerByUserId(loc.userId or 0)
         node=p and p.Character
@@ -797,6 +1071,8 @@ local function mix(a,b,u)
     local kind=typeof(a)
     if kind~=typeof(b) then return a end
     if kind=="number" then return a+(b-a)*u end
+    if kind=="UDim2" then return UDim2.new(a.X.Scale+(b.X.Scale-a.X.Scale)*u,a.X.Offset+(b.X.Offset-a.X.Offset)*u,a.Y.Scale+(b.Y.Scale-a.Y.Scale)*u,a.Y.Offset+(b.Y.Offset-a.Y.Offset)*u) end
+    if kind=="UDim" then return UDim.new(a.Scale+(b.Scale-a.Scale)*u,a.Offset+(b.Offset-a.Offset)*u) end
     if kind=="CFrame" or kind=="Vector3" or kind=="Vector2" or kind=="Color3" then return a:Lerp(b,u) end
     if kind=="NumberRange" then return NumberRange.new(a.Min+(b.Min-a.Min)*u,a.Max+(b.Max-a.Max)*u) end
     if kind=="NumberSequence" or kind=="ColorSequence" then
@@ -985,7 +1261,7 @@ function Snake.validateAssist(cfg,duration)
 end
 
 function Snake.validate(project)
-    assert(type(project)=="table" and (project.version==1 or project.version==2 or project.version==3 or project.version==4 or project.version==5),"Versao de projeto invalida")
+    assert(type(project)=="table" and (project.version==1 or project.version==2 or project.version==3 or project.version==4 or project.version==5 or project.version==6),"Versao de projeto invalida")
     assert(type(project.duration)=="number" and project.duration>0 and project.duration<=600,"Duracao: 0.01 a 600 segundos")
     assert(type(project.tracks)=="table" and #project.tracks<=512,"Limite: 512 faixas")
     local scales={}
@@ -1022,6 +1298,10 @@ function Snake.validate(project)
                     else for _,x in ipairs(key[field].data) do assert(type(x)=="number" and x==x and math.abs(x)<1e9,"Tangente inválida") end end
                 end
             end
+            if key.value.kind=="UDim2" or key.value.kind=="UDim" then
+                assert(type(key.value.data)=="table" and #key.value.data==(key.value.kind=="UDim2" and 4 or 2),"Dimensão de GUI inválida")
+                for _,n in ipairs(key.value.data) do assert(type(n)=="number" and n==n and math.abs(n)<1e9,"Componente de GUI inválido") end
+            end
             local value=Snake.unpack(key.value)
             if track.property=="ModelScale" then assert(type(value)=="number" and value>=.01 and value<=100,"Key de escala inválida") end
             if typeof(value)=="number" then assert(value==value and math.abs(value)<1e12,"Numero invalido") end
@@ -1054,6 +1334,7 @@ function Snake.validate(project)
             for _,n in ipairs(v) do assert(type(n)=="number" and n==n and math.abs(n)<1e9,"Numero IK invalido") end
         end
     end
+    Snake.validateCinema(project.cinema,project.duration)
     Snake.validateBody(project.body,project.duration)
     Snake.validateAssist(project.assist,project.duration)
     return project
@@ -1122,49 +1403,298 @@ function Snake.restore(compiled)
         end
     end
 end
-function Snake.play(project,options)
-    options=options or {}
-    Snake.validate(project)
-    local compiled=Snake.compile(project)
-    local duration=project.duration
-    local looping=options.Loop
-    if looping==nil then looping=project.loop==true end
-    local start=options.StartAt or Workspace:GetServerTimeNow()
-    local camera=Workspace.CurrentCamera
-    local cameraState=camera and {type=camera.CameraType,subject=camera.CameraSubject,cf=camera.CFrame,fov=camera.FieldOfView}
-    local hasCamera=false
-    for _,e in ipairs(compiled) do if e.track.target.root=="Camera" and #e.track.keys>0 then hasCamera=true end end
-    local lateFinished=not looping and Workspace:GetServerTimeNow()-start>=duration
-    local cameraAllowed=hasCamera and not lateFinished
-    local stopped=false
-    local connection
-    local controller={}
-    local function restoreCamera()
-        if cameraAllowed and camera and cameraState then
+
+-- CINEMA_EXTENSION_BEGIN
+-- Snake Animator V1: sequenciador declarativo. Eventos nunca executam strings como código.
+do
+    local function number(v,a,b) assert(type(v)=="number" and v==v and v>=a and v<=b,"Número inválido em Cutscene") end
+    local function text(v,max) assert(type(v)=="string" and #v<=max,"Texto inválido em Cutscene") end
+    local function locator(v)
+        assert(type(v)=="table" and type(v.path)=="table" and #v.path<=64,"Alvo de Cutscene inválido")
+        assert(({Workspace=true,PlayerGui=true,Lighting=true,SoundService=true,Camera=true,Character=true})[v.root],"Raiz de Cutscene inválida")
+        for _,p in ipairs(v.path) do text(p.name,256);text(p.class,80);number(p.index or 1,1,1000000) end
+    end
+    local function packed(v,kind,count)
+        assert(type(v)=="table" and v.kind==kind and type(v.data)=="table" and #v.data==count,"Pose de câmera inválida")
+        for _,n in ipairs(v.data) do number(n,-1e8,1e8) end
+    end
+    function Snake.validateCinema(c,duration)
+        if c==nil then return end
+        assert(type(c)=="table" and c.version==1,"Formato de Cutscene inválido")
+        for _,k in ipairs({"enabled","allowSkip","lockInput","restore"}) do assert(type(c[k])=="boolean","Opção de Cutscene inválida") end
+        number(c.letterbox,0,.25)
+        assert(type(c.shots)=="table" and #c.shots<=64 and type(c.events)=="table" and #c.events<=256,"Limites: 64 planos / 256 cues")
+        table.sort(c.shots,function(a,b) return a.start<b.start end)
+        local ids={};local finish=-1
+        for _,s in ipairs(c.shots) do
+            text(s.id,80);assert(not ids[s.id],"ID repetido");ids[s.id]=true;text(s.name,100)
+            number(s.start,0,duration);number(s.finish,s.start+.001,duration);assert(s.start>=finish-1e-7,"Planos de câmera sobrepostos");finish=s.finish
+            packed(s.from,"CFrame",12);packed(s.to,"CFrame",12);number(s.fov0,1,120);number(s.fov1,1,120)
+            assert(({linear=true,smooth=true,smoother=true,hold=true,["in"]=true,out=true,inout=true})[s.ease],"Curva de plano inválida")
+            if s.lookAt then locator(s.lookAt) end
+        end
+        table.sort(c.events,function(a,b) if a.t==b.t then return a.id<b.id end;return a.t<b.t end)
+        local fadeFinish=-1;local subtitleFinish=-1
+        for _,e in ipairs(c.events) do
+            text(e.id,80);assert(not ids[e.id],"ID repetido");ids[e.id]=true;text(e.name,100)
+            number(e.t,0,duration);number(e.duration,0,duration-e.t+1e-7)
+            if e.kind=="subtitle" then
+                number(e.duration,.001,duration);text(e.text,600);text(e.speaker or "",100)
+                assert(e.t>=subtitleFinish-1e-7,"Legendas sobrepostas");subtitleFinish=e.t+e.duration
+            elseif e.kind=="fade" then
+                number(e.duration,.001,duration);number(e.from,0,1);number(e.to,0,1)
+                assert(e.t>=fadeFinish-1e-7,"Fades sobrepostos");fadeFinish=e.t+e.duration
+            elseif e.kind=="sound" then
+                number(e.duration,.001,duration);locator(e.target);number(e.volume,0,3);number(e.rate,.05,4)
+            elseif e.kind=="emit" then
+                locator(e.target);number(e.count,1,1000);assert(e.count%1==0 and e.duration==0,"Burst precisa de contagem inteira / duração zero")
+            elseif e.kind=="marker" then text(e.text,200);assert(e.duration==0,"Marcador precisa de duração zero")
+            else error("Tipo de cue não suportado") end
+        end
+    end
+    function Snake.cinemaFrame(c,t)
+        if not c or not c.enabled then return nil end
+        for i,s in ipairs(c.shots) do
+            if t>=s.start and (t<s.finish or i==#c.shots and t==s.finish) then
+                local u=Snake.ease(math.clamp((t-s.start)/(s.finish-s.start),0,1),s.ease)
+                local cf=Snake.unpack(s.from):Lerp(Snake.unpack(s.to),u)
+                if s.lookAt then
+                    pcall(function()
+                        local target=Snake.resolve(s.lookAt);local point
+                        if target and target:IsA("Model") then point=target:GetPivot().Position
+                        elseif target and target:IsA("BasePart") then point=target.Position
+                        elseif target and target:IsA("Attachment") then point=target.WorldCFrame.Position end
+                        if point and (point-cf.Position).Magnitude>.001 then cf=CFrame.lookAt(cf.Position,point) end
+                    end)
+                end
+                return cf,s.fov0+(s.fov1-s.fov0)*u,s
+            end
+        end
+    end
+    function Snake.cinemaOverlay(c,t)
+        local subtitle,fade=nil,0
+        if not c or not c.enabled then return nil,0 end
+        for _,e in ipairs(c.events) do
+            if e.kind=="subtitle" and t>=e.t and t<e.t+e.duration then subtitle=e end
+            if e.kind=="fade" and t>=e.t then
+                local u=math.clamp((t-e.t)/e.duration,0,1);u=u*u*(3-2*u)
+                fade=e.from+(e.to-e.from)*u
+            end
+        end
+        return subtitle,fade
+    end
+    function Snake.cinemaCrossings(c,first,last)
+        local result={}
+        if c and c.enabled and last>=first then
+            for _,e in ipairs(c.events) do if (e.kind=="emit" or e.kind=="marker") and e.t>first and e.t<=last then result[#result+1]=e end end
+        end
+        return result
+    end
+    local serial=0
+    function Snake.newCinemaSession(c,options)
+        if not c or not c.enabled then return nil end
+        options=options or {};serial=serial+1
+        local S={sounds={},bursts={},closed=false,last=nil,warnings={}};local connections={};local gui,top,bottom,caption,fade,skip
+        local action="SnakeCutsceneInput_"..serial
+        local function make(class,parent,props)
+            local obj=Instance.new(class);for k,v in pairs(props) do obj[k]=v end;obj.Parent=parent;return obj
+        end
+        local pg=Players.LocalPlayer and Players.LocalPlayer:FindFirstChild("PlayerGui")
+        if pg then
+            gui=make("ScreenGui",pg,{Name="SnakeCutsceneHUD_"..serial,ResetOnSpawn=false,IgnoreGuiInset=true,DisplayOrder=options.preview and 30 or 60,ZIndexBehavior=Enum.ZIndexBehavior.Sibling})
+            gui:SetAttribute("SnakeEditorVisual",true)
+            top=make("Frame",gui,{Name="LetterboxTop",Position=UDim2.new(),Size=UDim2.new(1,0,c.letterbox,0),BackgroundColor3=Color3.new(),BorderSizePixel=0,Active=false})
+            bottom=make("Frame",gui,{Name="LetterboxBottom",Position=UDim2.new(0,0,1-c.letterbox,0),Size=UDim2.new(1,0,c.letterbox,0),BackgroundColor3=Color3.new(),BorderSizePixel=0,Active=false})
+            caption=make("TextLabel",gui,{Name="Subtitle",Position=UDim2.new(.06,0,.73-c.letterbox/2,0),Size=UDim2.new(.88,0,.18,0),BackgroundColor3=Color3.new(),BackgroundTransparency=.35,BorderSizePixel=0,TextColor3=Color3.new(1,1,1),Font=Enum.Font.GothamMedium,TextSize=20,TextWrapped=true,RichText=false,Text="",Visible=false,ZIndex=2})
+            fade=make("Frame",gui,{Name="Fade",Size=UDim2.fromScale(1,1),BackgroundColor3=Color3.new(),BackgroundTransparency=1,BorderSizePixel=0,Active=false,ZIndex=3})
+            if c.allowSkip and not options.preview then
+                skip=make("TextButton",gui,{Name="SkipCutscene",Text="Pular cena",Position=UDim2.new(1,-132,1,-52),Size=UDim2.fromOffset(120,36),BackgroundColor3=Color3.new(.08,.1,.13),TextColor3=Color3.new(1,1,1),Font=Enum.Font.GothamMedium,TextSize=14,ZIndex=4})
+                connections[#connections+1]=skip.Activated:Connect(function() if options.onSkip then options.onSkip() end end)
+            end
+        end
+        S.gui=gui
+        local context
+        if c.lockInput and not options.preview then
             pcall(function()
-                camera.CFrame=cameraState.cf;camera.FieldOfView=cameraState.fov
-                camera.CameraSubject=cameraState.subject;camera.CameraType=cameraState.type
+                context=game:GetService("ContextActionService")
+                context:BindActionAtPriority(action,function() return Enum.ContextActionResult.Sink end,false,4500,
+                    Enum.PlayerActions.CharacterForward,Enum.PlayerActions.CharacterBackward,Enum.PlayerActions.CharacterLeft,Enum.PlayerActions.CharacterRight,Enum.PlayerActions.CharacterJump,
+                    Enum.UserInputType.MouseButton2,Enum.UserInputType.MouseWheel)
             end)
         end
-    end
-    function controller.Stop(restore)
-        if stopped then
-            if restore then Snake.restore(compiled) end
-            return
+        local function warning(id,message)
+            if not S.warnings[id] then S.warnings[id]=true;warn("Snake Cutscene: "..tostring(message)) end
         end
-        stopped=true
+        local function emit(e)
+            if S.closed then return end
+            if e.kind=="marker" then
+                if options.onMarker then local ok,err=pcall(options.onMarker,e.text,e.id,e.t);if not ok then warning(e.id,err) end end
+                return
+            end
+            local burst
+            local ok,err=pcall(function()
+                local source=assert(Snake.resolve(e.target),"Emitter ausente: "..e.name)
+                assert(source:IsA("ParticleEmitter"),"Burst requer ParticleEmitter")
+                burst=source:Clone();assert(burst,"Emitter não permite Clone")
+                burst.Name="SnakeCutsceneBurst";burst.Enabled=false;burst:SetAttribute("SnakeEditorVisual",true);burst.Parent=source.Parent
+                burst:Emit(e.count)
+                S.bursts[#S.bursts+1]={object=burst,untilTime=Workspace:GetServerTimeNow()+math.min(120,source.Lifetime.Max+.1)}
+            end)
+            if not ok then if burst then burst:Destroy() end;warning(e.id,err) end
+        end
+        function S.Step(t,flags)
+            if S.closed then return end
+            flags=flags or {}
+            local subtitle,alpha=Snake.cinemaOverlay(c,t)
+            if gui then
+                caption.Visible=subtitle~=nil
+                caption.Text=subtitle and ((subtitle.speaker and subtitle.speaker~="" and subtitle.speaker.."\n" or "")..subtitle.text) or ""
+                fade.BackgroundTransparency=1-alpha
+            end
+            if flags.fire then
+                local from=S.last
+                if flags.looped and flags.looped>0 then
+                    if flags.looped==1 and from then for _,e in ipairs(Snake.cinemaCrossings(c,from,options.duration or t)) do emit(e) end end
+                    from=-1e-8
+                elseif from==nil then from=t<=.05 and -1e-8 or t-.001 end
+                for _,e in ipairs(Snake.cinemaCrossings(c,from,t)) do emit(e) end
+            end
+            if S.closed then return end
+            S.last=t
+            if flags.looped and flags.looped>0 then for _,entry in pairs(S.sounds) do entry.object:Destroy() end;S.sounds={} end
+            local active={}
+            for _,e in ipairs(c.events) do if e.kind=="sound" and t>=e.t and t<e.t+e.duration then
+                active[e.id]=true
+                local entry=S.sounds[e.id]
+                if flags.audio then
+                    local sound
+                    local ok,err=pcall(function()
+                        local source=assert(Snake.resolve(e.target),"Sound ausente: "..e.name);assert(source:IsA("Sound"),"Cue requer Sound")
+                        if not entry then
+                            sound=source:Clone();assert(sound,"Sound não permite Clone");sound.Name="SnakeCutsceneSound";sound.Looped=false;sound.PlayOnRemove=false;sound:Stop();sound:SetAttribute("SnakeEditorVisual",true)
+                            sound.Parent=source.Parent;entry={object=sound,running=false};S.sounds[e.id]=entry
+                        end
+                        sound=entry.object
+                        sound.Volume=math.clamp(source.Volume*e.volume,0,10);sound.PlaybackSpeed=e.rate*(flags.rate or 1)
+                        if not entry.running or flags.seek then sound:Play();entry.running=true;entry.positioned=false end
+                        local pos=(t-e.t)*e.rate
+                        if sound.TimeLength>0 then
+                            pos=math.min(pos,math.max(0,sound.TimeLength-.01))
+                            if not entry.positioned or math.abs(sound.TimePosition-pos)>.2 then sound.TimePosition=pos;entry.positioned=true end
+                        end
+                    end)
+                    if not ok then if sound and not entry then sound:Destroy() end;warning(e.id,err) end
+                elseif entry and entry.running then entry.object:Pause();entry.running=false;entry.positioned=false end
+            end end
+            for id,entry in pairs(S.sounds) do if not active[id] then entry.object:Destroy();S.sounds[id]=nil end end
+            for i=#S.bursts,1,-1 do if Workspace:GetServerTimeNow()>=S.bursts[i].untilTime then S.bursts[i].object:Destroy();table.remove(S.bursts,i) end end
+        end
+        function S.Close()
+            if S.closed then return end;S.closed=true
+            if context then pcall(function() context:UnbindAction(action) end) end
+            for _,connection in ipairs(connections) do connection:Disconnect() end
+            for _,entry in pairs(S.sounds) do entry.object:Destroy() end;S.sounds={}
+            for _,entry in ipairs(S.bursts) do entry.object:Destroy() end;S.bursts={}
+            if gui then gui:Destroy() end
+        end
+        return S
+    end
+end
+
+-- Playback V1 / formato 6: câmera restaurável, transporte local e sessões de cutscene.
+function Snake.play(project,options)
+    options=options or {};Snake.validate(project)
+    local compiled=Snake.compile(project);local duration=project.duration
+    local looping=options.Loop;if looping==nil then looping=project.loop==true end
+    local c=project.cinema and project.cinema.enabled and project.cinema or nil
+    local hasCamera=false
+    for _,e in ipairs(compiled) do if e.track.target.root=="Camera" and #e.track.keys>0 then hasCamera=true end end
+    local ownsPresentation=hasCamera or c~=nil
+    local start=options.StartAt or Workspace:GetServerTimeNow();local offset=0;local rate=options.Rate or 1
+    assert(type(rate)=="number" and rate==rate and rate>=.05 and rate<=4,"Velocidade: 0.05–4")
+    assert(type(start)=="number" and start==start and math.abs(start)<1e16,"StartAt inválido")
+    local paused,stopped=false,false;local connection,binding,session
+    local cameras={};local cycle=nil;local controller={}
+    local initialLate=not looping and (Workspace:GetServerTimeNow()-start)*rate>=duration
+    if ownsPresentation and not initialLate then
+        if Snake._presentation then Snake._presentation.Stop(false) end
+        Snake._presentation=controller
+    end
+    local function ownCamera()
+        local camera=Workspace.CurrentCamera
+        if camera and not cameras[camera] then cameras[camera]={cf=camera.CFrame,focus=camera.Focus,fov=camera.FieldOfView,kind=camera.CameraType,subject=camera.CameraSubject} end
+        return camera
+    end
+    local function restoreCamera()
+        for camera,state in pairs(cameras) do if camera.Parent then pcall(function()
+            camera.CFrame=state.cf;camera.Focus=state.focus;camera.FieldOfView=state.fov;camera.CameraSubject=state.subject;camera.CameraType=state.kind
+        end) end end;cameras={}
+    end
+    local function rawTime() return paused and offset or offset+(Workspace:GetServerTimeNow()-start)*rate end
+    local function sceneTime(t) return looping and t%duration or math.clamp(t,0,duration) end
+    local function render(t,fire)
+        local shot,fov,shotInfo=Snake.cinemaFrame(c,t)
+        local allowed=not initialLate and (hasCamera or shot~=nil)
+        local camera=allowed and ownCamera() or nil
+        if not allowed and next(cameras) then restoreCamera() end
+        Snake.apply(compiled,t,allowed)
+        if shotInfo and shotInfo.lookAt then shot,fov=Snake.cinemaFrame(c,t) end
+        if camera and shot then camera.CameraType=Enum.CameraType.Scriptable;camera.CFrame=shot;camera.FieldOfView=fov;camera.Focus=shot*CFrame.new(0,0,-10) end
+        if c and not initialLate then
+            if not session then session=Snake.newCinemaSession(c,{duration=duration,onSkip=function() controller.Skip() end,onMarker=options.OnMarker}) end
+            local currentCycle=looping and math.floor(math.max(0,rawTime())/duration) or 0
+            session.Step(t,{fire=fire and not paused,audio=not paused,seek=not fire,rate=rate,looped=cycle and currentCycle-cycle or 0})
+            cycle=currentCycle
+        end
+    end
+    local function restoreObjects()
+        for _,entry in ipairs(compiled) do if entry.track.target.root~="Camera" then Snake.restore({entry}) end end
+    end
+    local function finish(restore,reason)
+        if stopped then if restore then restoreObjects() end;return end
+        offset=math.max(0,rawTime());paused=true;stopped=true
         if connection then connection:Disconnect() end
-        if restore then Snake.restore(compiled) end
+        if binding then pcall(function() RunService:UnbindFromRenderStep(binding) end) end
+        if session then session.Close() end
+        if restore then restoreObjects() end
         restoreCamera()
+        if Snake._presentation==controller then Snake._presentation=nil end
+        if options.OnFinished then local ok,err=pcall(options.OnFinished,reason);if not ok then warn("Snake Animator OnFinished: "..tostring(err)) end end
+    end
+    function controller.Stop(restore) finish(restore==true,"stopped") end
+    function controller.Skip() finish(c and c.restore==true,"skipped") end
+    function controller.GetTime() return sceneTime(math.max(0,rawTime())) end
+    function controller.Pause()
+        if stopped or paused then return end
+        offset=math.max(0,rawTime());paused=true;render(sceneTime(offset),false)
+    end
+    function controller.Resume()
+        if stopped or not paused then return end
+        start=Workspace:GetServerTimeNow();paused=false
+    end
+    function controller.Seek(t)
+        assert(type(t)=="number" and t==t and t>=0 and t<=duration,"Seek fora da cena")
+        if stopped then return end
+        offset=t;start=Workspace:GetServerTimeNow();initialLate=false;cycle=nil;render(sceneTime(offset),false)
+    end
+    function controller.SetRate(value)
+        assert(type(value)=="number" and value==value and value>=.05 and value<=4,"Velocidade: 0.05–4")
+        if stopped then return end
+        offset=rawTime();start=Workspace:GetServerTimeNow();rate=value
     end
     local function step()
-        local elapsed=Workspace:GetServerTimeNow()-start
-        if elapsed<0 then return end
-        local t=looping and (elapsed%duration) or math.min(elapsed,duration)
-        Snake.apply(compiled,t,cameraAllowed)
-        if not looping and elapsed>=duration then controller.Stop(options.RestoreOnFinish==true) end
+        if stopped then return end
+        local elapsed=rawTime();if elapsed<0 then return end
+        local ok,err=pcall(render,sceneTime(elapsed),true)
+        if not ok then warn("Snake Animator playback: "..tostring(err));finish(true,"error");return end
+        if not paused and not looping and elapsed>=duration then finish(options.RestoreOnFinish==true or c and c.restore==true,"completed") end
     end
-    connection=(RunService:IsClient() and RunService.RenderStepped or RunService.Heartbeat):Connect(step)
+    if hasCamera or c and #c.shots>0 then
+        Snake._playSerial=(Snake._playSerial or 0)+1;local name="SnakeCutscenePlayback_"..Snake._playSerial
+        local ok=pcall(function() RunService:BindToRenderStep(name,2100,step) end)
+        if ok then binding=name end
+    end
+    if not binding then connection=(RunService:IsClient() and RunService.RenderStepped or RunService.Heartbeat):Connect(step) end
     step()
     return controller
 end
@@ -1717,12 +2247,13 @@ local window=frame(gui,UDim2.fromScale(.5,.5),UDim2.fromOffset(960,650),C.bg)
 window.AnchorPoint=Vector2.new(.5,.5);window.ZIndex=20;corner(window,12)
 make("UIStroke",window,{Color=C.line,Thickness=1})
 local header=frame(window,UDim2.new(),UDim2.new(1,0,0,47),C.panel);header.Active=true;corner(header,12)
-label(header,"SNAKE / ANIMATOR",UDim2.fromOffset(14,3),UDim2.new(1,-135,0,25))
-label(header,"05.1  •  câmera fixa / membros",UDim2.fromOffset(14,25),UDim2.new(1,-100,0,17),true)
-local toggle=button(gui,"◈  Snake Animator",UDim2.new(0,12,1,-52),UDim2.fromOffset(166,38),function() window.Visible=not window.Visible;if window.Visible then V5.active=true end;if V5.layout then V5.layout() end end,true)
+label(header,"SNAKE ANIMATOR V1",UDim2.fromOffset(14,3),UDim2.new(1,-135,0,25))
+label(header,"Membros • transformação • animação",UDim2.fromOffset(14,25),UDim2.new(1,-100,0,17),true)
+local toggle=button(gui,"◈  Snake Animator V1",UDim2.new(0,12,1,-52),UDim2.fromOffset(190,38),function() window.Visible=not window.Visible;if window.Visible then V5.active=true end;if V5.layout then V5.layout() end end,true)
 button(header,"—",UDim2.new(1,-76,0,8),UDim2.fromOffset(30,30),function() window.Visible=false end)
 local status=label(window,"Pronto. Selecione um objeto ou abra um rig.",UDim2.new(0,12,1,-32),UDim2.new(1,-24,0,27),true)
 local function notify(msg,bad)
+    V5.notice={text=tostring(msg),bad=bad==true,untilTime=os.clock()+(bad and 12 or 5)}
     status.Text=msg;status.TextColor3=bad and C.warn or C.muted
 end
 local function safe(fn)
@@ -1746,14 +2277,15 @@ local function showPage(name)
     for key,p in pairs(pages) do p.Visible=key==name end
     for key,b in pairs(tabButtons) do b.BackgroundColor3=key==name and C.accent or C.field;b.TextColor3=key==name and C.dark or C.text end
 end
-for i,name in ipairs({"Cena","Pose","Motion","Timeline","Exportar"}) do
+for i,name in ipairs({"Cena","Pose","Motion","Cutscene","Timeline","Exportar"}) do
     local tab=name
-    tabButtons[name]=button(window,name,UDim2.new((i-1)/5,5,0,54),UDim2.new(.2,-7,0,32),function() showPage(tab) end)
+    tabButtons[name]=button(window,name,UDim2.new((i-1)/6,5,0,54),UDim2.new(1/6,-7,0,32),function() showPage(tab) end)
+    tabButtons[name].TextScaled=true;make("UITextSizeConstraint",tabButtons[name],{MinTextSize=10,MaxTextSize=13})
     pages[name]=frame(window,UDim2.fromOffset(10,138),UDim2.new(1,-20,1,-176),C.bg)
 end
 
 local advancedHooks={}
-local project={version=5,name="Snake Scene",duration=5,fps=60,loop=false,tracks={}}
+local project={version=6,name="Snake Scene",duration=5,fps=60,loop=false,tracks={}}
 local selected,selectedProperty,selectedTrack,selectedKey=nil,nil,nil,nil
 local playhead,playing,playStart=0,false,0
 local defaultEase="smooth"
@@ -1793,7 +2325,7 @@ local function clone(t)
     local c={};for k,v in pairs(t) do c[k]=clone(v) end;return c
 end
 local projectRevision=0
-local function snapshot()
+local function snapshot(keepBodyBake)
     projectRevision=projectRevision+1
     local units=0
     for _,tr in ipairs(project.tracks) do units=units+#tr.keys end
@@ -1806,7 +2338,7 @@ local function snapshot()
     local limit=units>10000 and 4 or (units>3000 and 10 or 40)
     table.insert(undoStack,clone(project));while #undoStack>limit do table.remove(undoStack,1) end
     redoStack={}
-    if project.body then project.body.baked=false end
+    if project.body and not keepBodyBake then project.body.baked=false end
     if advancedHooks.edited then advancedHooks.edited() end
 end
 local function remember(obj,prop)
@@ -1875,6 +2407,10 @@ local function keyCurrent()
     snapshot()
     selectedTrack=ensureTrack(selected,selectedProperty)
     selectedKey=insertKey(selectedTrack,playhead,Snake.read(selected,selectedProperty))
+    if V5.pending and V5.pending.object==selected and V5.pending.unkeyed then
+        for i=#V5.pending.properties,1,-1 do if V5.pending.properties[i]==selectedProperty then table.remove(V5.pending.properties,i) end end
+        if #V5.pending.properties==0 then V5.pending=nil end
+    end
     refreshTimeline();notify("Keyframe salvo em "..string.format("%.3fs",playhead))
 end
 local function releaseCamera()
@@ -1900,18 +2436,18 @@ stopPreview=function(restore)
 end
 previewAt=function(t,updateFields)
     playhead=math.clamp(t,0,project.duration)
-    if cameraPreview then ownCamera() end
-    Snake.apply(compiled,playhead,cameraPreview)
+    if cameraPreview and not (V5.cutscene and V5.cutscene.preview) then ownCamera() end
+    Snake.apply(compiled,playhead,cameraPreview and not (V5.cutscene and V5.cutscene.preview))
     timeBox.Text=string.format("%.3f",playhead)
     if updateFields then refreshInspector() end
     if advancedHooks.timeChanged then advancedHooks.timeChanged(updateFields) end
 end
 local function playPause()
     if playing then stopPreview(false);notify("Pausado.");return end
-    if #project.tracks==0 then notify("Crie pelo menos uma faixa com keyframes.",true);return end
+    if #project.tracks==0 and not (project.cinema and project.cinema.enabled) then notify("Crie pelo menos uma faixa com keyframes.",true);return end
     if playhead>=project.duration then playhead=0 end
     rebuild();playStart=os.clock()-playhead;playing=true;playButton.Text="Ⅱ Pause"
-    if cameraPreview then ownCamera() end
+    if cameraPreview and not (V5.cutscene and V5.cutscene.preview) then ownCamera() end
 end
 
 playButton=button(window,"▶ Play",UDim2.fromOffset(10,94),UDim2.new(.19,-8,0,34),safe(playPause),true)
@@ -1946,6 +2482,10 @@ connect(durationBox.FocusLost,safe(function()
     if project.assist then
         last=math.max(last,project.assist.last,project.assist.flight.finish)
         for _,field in ipairs({"rootSource","inputSource"}) do local src=project.assist[field];if src then for _,k in ipairs(src.keys) do last=math.max(last,k.t) end end end
+    end
+    if project.cinema then
+        for _,s in ipairs(project.cinema.shots) do last=math.max(last,s.finish) end
+        for _,e in ipairs(project.cinema.events) do last=math.max(last,e.t+e.duration) end
     end
     assert(d>=last,"Apague/mova as chaves após "..d.."s antes de reduzir")
     snapshot();project.duration=d;playhead=math.min(playhead,d);refreshTimeline()
@@ -1986,7 +2526,19 @@ local function properties(obj)
     elseif obj:IsA("ShirtGraphic") then add("Graphic")
     elseif obj:IsA("BodyColors") then add("HeadColor3","LeftArmColor3","RightArmColor3","LeftLegColor3","RightLegColor3","TorsoColor3")
     elseif obj:IsA("SpecialMesh") then add("Scale","Offset","TextureId")
-    elseif obj:IsA("Sound") then add("Volume","PlaybackSpeed")
+    elseif obj:IsA("Sound") then add("Volume","PlaybackSpeed","SoundId","Looped")
+    elseif obj:IsA("UIScale") then add("Scale")
+    elseif obj:IsA("UICorner") then add("CornerRadius")
+    elseif obj:IsA("UIStroke") then add("Enabled","Color","Transparency","Thickness")
+    elseif obj:IsA("UIGradient") then add("Enabled","Color","Transparency","Offset","Rotation")
+    elseif obj:IsA("UIAspectRatioConstraint") then add("AspectRatio")
+    elseif obj:IsA("LayerCollector") then add("Enabled")
+    elseif obj:IsA("GuiObject") then
+        add("Position","Size","AnchorPoint","Rotation","Visible","BackgroundColor3","BackgroundTransparency","ClipsDescendants")
+        if obj:IsA("CanvasGroup") then add("GroupTransparency","GroupColor3") end
+        if obj:IsA("ScrollingFrame") then add("CanvasPosition") end
+        if obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then add("Text","TextSize","TextColor3","TextTransparency") end
+        if obj:IsA("ImageLabel") or obj:IsA("ImageButton") then add("Image","ImageColor3","ImageTransparency") end
     elseif obj==Lighting then add("ClockTime","Brightness","ExposureCompensation","FogStart","FogEnd","FogColor","Ambient","OutdoorAmbient")
     elseif obj:IsA("Atmosphere") then add("Density","Offset","Color","Decay","Glare","Haze")
     elseif obj:IsA("ColorCorrectionEffect") then add("Enabled","Brightness","Contrast","Saturation","TintColor")
@@ -2018,7 +2570,7 @@ refreshExplorer=function()
     local query=search.Text:lower()
     local n=0
     for _,obj in ipairs(children) do
-        local allowed=obj~=selectionBox and obj~=gizmoProxy and not obj:GetAttribute("SnakeEditorVisual") and (not jointsOnly or obj:IsA("Motor6D") or obj:IsA("Bone"))
+        local allowed=obj~=gui and obj~=selectionBox and obj~=gizmoProxy and not obj:GetAttribute("SnakeEditorVisual") and (not jointsOnly or obj:IsA("Motor6D") or obj:IsA("Bone"))
         if allowed and (query=="" or string.find((obj.Name.." "..obj.ClassName):lower(),query,1,true)) then
             n=n+1;if n>240 then break end
             local y=(n-1)*42
@@ -2028,13 +2580,13 @@ refreshExplorer=function()
     end
     if n==0 then label(explorer,"Nenhum filho encontrado. Use ↑ ou troque a raiz.",UDim2.fromOffset(8,10),UDim2.new(1,-16,0,50),true) end
 end
-local roots={{"Mundo",Workspace},{"Luz",Lighting},{"Som",SoundService}}
+local roots={{"Mundo",Workspace},{"Luz",Lighting},{"Som",SoundService},{"Interface",playerGui}}
 for i,item in ipairs(roots) do
     local root=item[2]
-    button(scene,item[1],UDim2.new((i-1)*.2,0,0,0),UDim2.new(.2,-5,0,34),function() sceneRoot=root;jointsOnly=false;refreshExplorer() end)
+    button(scene,item[1],UDim2.new((i-1)/6,0,0,0),UDim2.new(1/6,-5,0,34),function() sceneRoot=root;jointsOnly=false;refreshExplorer() end)
 end
-button(scene,"Câmera",UDim2.new(.6,0,0,0),UDim2.new(.2,-5,0,34),safe(function() selectObject(Workspace.CurrentCamera) end))
-button(scene,"↑",UDim2.new(.8,0,0,0),UDim2.new(.2,0,0,34),function()
+button(scene,"Câmera",UDim2.new(4/6,0,0,0),UDim2.new(1/6,-5,0,34),safe(function() selectObject(Workspace.CurrentCamera) end))
+button(scene,"↑",UDim2.new(5/6,0,0,0),UDim2.new(1/6,0,0,34),function()
     if jointsOnly then jointsOnly=false elseif sceneRoot.Parent and sceneRoot.Parent~=game then sceneRoot=sceneRoot.Parent end
     refreshExplorer()
 end)
@@ -2079,6 +2631,8 @@ refreshInspector=function()
         names={"X (studs)","Y (studs)","Z (studs)","RX (graus)","RY (graus)","RZ (graus)"}
         values={v.X,v.Y,v.Z,math.deg(rx),math.deg(ry),math.deg(rz)}
         fieldHint.Text=(selectedProperty=="C0" or selectedProperty=="Transform" or selected:IsA("Attachment")) and "Coordenadas locais da junta. C0 é a pose-base do Motor6D; use rigs sem outra animação concorrente." or "Coordenadas do mundo. Para um rig, mova o Model/Pivot e pose suas juntas; evite mover membros por CFrame."
+    elseif fieldKind=="UDim2" then names={"X escala","X offset","Y escala","Y offset"};values={v.X.Scale,v.X.Offset,v.Y.Scale,v.Y.Offset}
+    elseif fieldKind=="UDim" then names={"Escala","Offset"};values={v.Scale,v.Offset}
     elseif fieldKind=="Vector3" then names={"X","Y","Z"};values={v.X,v.Y,v.Z}
     elseif fieldKind=="Vector2" then names={"X","Y"};values={v.X,v.Y}
     elseif fieldKind=="Color3" then names={"R (0–255)","G (0–255)","B (0–255)"};values={v.R*255,v.G*255,v.B*255}
@@ -2109,6 +2663,8 @@ local function readFields()
         else a[i]=tonumber(b.Text);assert(a[i] and a[i]==a[i] and math.abs(a[i])<1e9,"Número inválido no campo "..i) end
     end
     if fieldKind=="CFrame" then return CFrame.new(a[1],a[2],a[3])*CFrame.fromOrientation(math.rad(a[4]),math.rad(a[5]),math.rad(a[6])) end
+    if fieldKind=="UDim2" then return UDim2.new(a[1],a[2],a[3],a[4]) end
+    if fieldKind=="UDim" then return UDim.new(a[1],a[2]) end
     if fieldKind=="Vector3" then return Vector3.new(a[1],a[2],a[3]) end
     if fieldKind=="Vector2" then return Vector2.new(a[1],a[2]) end
     local function color(offset) return Color3.fromRGB(math.clamp(a[offset],0,255),math.clamp(a[offset+1],0,255),math.clamp(a[offset+2],0,255)) end
@@ -2167,6 +2723,7 @@ button(poseInner,"Key da câmera atual",UDim2.fromOffset(0,439),UDim2.new(.5,-4,
 end))
 local camButton
 camButton=button(poseInner,"Prévia câmera: Off",UDim2.new(.5,4,0,439),UDim2.new(.5,-4,0,36),function()
+    if V5.cutscene then V5.cutscene.stopped(true) end
     cameraPreview=not cameraPreview;camButton.Text=cameraPreview and "Prévia câmera: On" or "Prévia câmera: Off"
     if cameraPreview then previewAt(playhead,false) else releaseCamera() end
 end)
@@ -2300,11 +2857,11 @@ end
 connect(exportText:GetPropertyChangedSignal("Text"),fitExport)
 local function projectJSON(playback)
     Snake.validate(project)
-    project.version=5
+    project.version=6
     local data=project
     if playback then
         if project.body and #project.body.effectors>0 then assert(project.body.baked==true,"Body bake pendente. Use Motion → Corpo → Bake corporal antes de exportar") end
-        data={version=5,name=project.name,duration=project.duration,fps=project.fps,loop=project.loop,tracks=project.tracks}
+        data={version=6,name=project.name,duration=project.duration,fps=project.fps,loop=project.loop,tracks=project.tracks,cinema=project.cinema}
     end
     return HttpService:JSONEncode(data)
 end
@@ -2346,7 +2903,7 @@ button(exportPage,"Copiar / selecionar",UDim2.new(0,0,1,-34),UDim2.new(.5,-4,0,3
     notify("Texto selecionado. Use Copiar do teclado/menu do aparelho.")
 end)
 button(exportPage,"Como integrar?",UDim2.new(.5,4,1,-34),UDim2.new(.5,-4,0,32),function()
-    output("SNAKE ANIMATOR 5.1 / MOTION ASSIST\n\nEditor: execute o fonte completo no seu executor\ndentro do Studio Lite. Não depende de readfile.\nMotion > Física: apoio e salto.\nAbra Motion > Corpo para controles, contatos e limites.\nProjetos com Body precisam de Bake corporal atualizado\nantes de exportar. As alterações invalidam o bake.\n\nCLIENT: LocalScript; ONLY_USER_ID filtra seu jogador.\nSERVER: Script em ServerScriptService + Receptor v5\nem StarterPlayerScripts. Um receptor por cliente.\nÉ sincronização visual, não física autoritativa.\n\nRemova a chamada automática final e use\nplaySnakeAnimation() no seu sistema.\nanimation.Stop(true) interrompe e restaura.\n\nExporte JSON antes de parar o Play.\nUse os arquivos 09 e 10 para o demo Body.\nLeia LEIA-ME.md para instalação, limites e exemplos.\nNão há equivalência completa ao Cascadeur,\nauto-physics ou garantia de 240 FPS.\n", "Guia rápido V5 • consulte LEIA-ME.md no pacote.")
+    output("SNAKE ANIMATOR V1 / MOTION ASSIST\n\nEditor: execute o fonte completo no seu executor\ndentro do Studio Lite. Não depende de readfile.\nMotion > Física: apoio e salto.\nCutscene: planos, legendas, fades, áudio e VFX.\nCenas usam Receptor formato 6 desta edição.\nAbra Motion > Corpo para controles, contatos e limites.\nProjetos com Body precisam de Bake corporal atualizado\nantes de exportar. As alterações invalidam o bake.\n\nCLIENT: LocalScript; ONLY_USER_ID filtra seu jogador.\nSERVER: Script em ServerScriptService + Receptor V1 (formato 6)\nem StarterPlayerScripts. Um receptor por cliente.\nÉ sincronização visual, não física autoritativa.\n\nRemova a chamada automática final e use\nplaySnakeAnimation() no seu sistema.\nanimation.Stop(true) interrompe e restaura.\n\nExporte JSON antes de parar o Play.\nUse os arquivos 09 e 10 para o demo Body.\nLeia LEIA-ME.md para instalação, limites e exemplos.\nNão há equivalência completa ao Cascadeur,\nauto-physics ou garantia de 240 FPS.\n", "Guia rápido V1 • consulte LEIA-ME.md no pacote.")
 end)
 
 -- V5.1: captura temporária de câmera durante manipulação, não uma câmera permanente.
@@ -2537,7 +3094,7 @@ local function installTransformGizmos()
         write(drag.property,value);if position then write("CFrame",position) end
         selectedProperty=drag.property;selectedTrack=findTrack(drag.object,drag.property)
         if drag.auto then for _,k in ipairs(selectedTrack.keys) do if math.abs(k.t-drag.time)<1e-6 then selectedKey=k;break end end end
-        V5.pending={object=drag.object,properties={}}
+        V5.pending={object=drag.object,properties={},unkeyed=not drag.auto}
         for prop in pairs(drag.values) do V5.pending.properties[#V5.pending.properties+1]=prop end
         V5.dirty=true
     end
@@ -2579,6 +3136,7 @@ local function installTransformGizmos()
         else list={property(gizmoMode=="scale" and "scale" or "move")} end
         snapshot()
         for _,p in ipairs(list) do local tr=ensureTrack(selected,p);insertKey(tr,playhead,Snake.read(selected,p)) end
+        V5.pending=nil
         refreshTimeline();notify("Key transformação: "..#list.." canais gravados juntos.")
     end
     poseInner.Size=UDim2.new(1,-6,0,850)
@@ -3105,6 +3663,12 @@ local function installAdvancedTools()
             local duration=finite(retimeBox.Text,.01,600)
             local ratio=duration/project.duration
             if project.assist then assert(project.assist.flight.gravity/(ratio*ratio)<=1000,"Retiming excederia a gravidade máxima de Assist (1000). Use uma razão maior.") end
+            if project.cinema then
+                local c=clone(project.cinema)
+                for _,s in ipairs(c.shots) do s.start=s.start*ratio;s.finish=s.finish*ratio end
+                for _,e in ipairs(c.events) do e.t=e.t*ratio;e.duration=e.duration*ratio end
+                Snake.validateCinema(c,duration)
+            end
             snapshot()
             for _,tr in ipairs(project.tracks) do for _,key in ipairs(tr.keys) do
                 key.t=key.t*ratio
@@ -4278,14 +4842,16 @@ local function installAdvancedTools()
         P.refresh()
     end
 
-    advancedHooks.edited=function() if A.physics then A.physics.invalidate() end end
+    advancedHooks.edited=function() if V5.cutscene then V5.cutscene.invalidate() end; if A.physics then A.physics.invalidate() end end
     advancedHooks.previewStopped=function(restore)
+        if V5.cutscene then V5.cutscene.stopped(restore) end
         if restore then A.pin=false;A.refreshIK();if A.body then A.body.live=false;A.body.refresh() end end
     end
     advancedHooks.tracksChanged=function()
         A.dirtyGraph=true;A.ghostDirty=true;if A.physics then A.physics.invalidate() end
     end
     advancedHooks.timeChanged=function(updateFields)
+        if V5.cutscene then V5.cutscene.update() end
         if A.physics then A.physics.invalidate() end
         if A.pin and project.ik and not A.baking then
             local ok,err=pcall(A.solveIK,false)
@@ -4298,12 +4864,15 @@ local function installAdvancedTools()
         if updateFields then A.dirtyGraph=true;A.ghostDirty=true;if A.body then A.body.refreshFields() end end
     end
     advancedHooks.projectChanged=function()
+        if V5.cutscene then V5.cutscene.reset() end
+        V5.pending=nil
         A.pin=false;A.graphRange=nil;A.dirtyGraph=true;A.posesIndex=1
         A.clearMotionViews();A.refreshIK();A.refreshPoses()
         if A.physics then A.physics.invalidate();A.physics.refresh() end
         if A.body then A.body.live=false;A.body.gizmo="off";A.body.result=nil;A.body.refresh() end
     end
     advancedHooks.cleanup=function()
+        if V5.cutscene then V5.cutscene.close() end
         if A.cleanupDone then return end
         A.cleanupDone=true;A.pin=false;A.ikGizmo="off"
         if A.body then A.body.live=false;A.body.gizmo="off" end
@@ -4336,6 +4905,7 @@ local function installAdvancedTools()
         end
     end)
     advancedHooks.retime=function(ratio)
+        if V5.cutscene then V5.cutscene.retime(ratio) end
         if A.physics then A.physics.retime(ratio) end
         local body=project.body;if not body then return end
         for _,e in ipairs(body.effectors) do
@@ -4436,7 +5006,7 @@ connect(RunService.RenderStepped,function()
     if playing then
         local elapsed=os.clock()-playStart
         if elapsed>=project.duration and not project.loop then
-            previewAt(project.duration,false);playing=false;playButton.Text="▶ Play";releaseCamera();refreshInspector()
+            previewAt(project.duration,false);playing=false;playButton.Text="▶ Play";if V5.cutscene then V5.cutscene.stopped(true) end;releaseCamera();refreshInspector()
         else previewAt(project.loop and (elapsed%project.duration) or elapsed,false) end
     end
     playLine.Position=UDim2.fromOffset(playhead*pixelsPerSecond,0)
@@ -4449,14 +5019,15 @@ end)
 local function installWorkspaceUI()
     local W={external="desconectado",connections={},touches={},lastPoll=0};V5.workspace=W
     local toolbar=frame(gui,UDim2.fromOffset(12,48),UDim2.fromOffset(620,82),C.panel);toolbar.Name="SnakeWorkspaceToolbar";toolbar.ZIndex=20;corner(toolbar,10)
-    local title=label(toolbar,"SNAKE 05.1  /  MEMBROS",UDim2.fromOffset(10,5),UDim2.new(1,-20,0,24));title.TextColor3=C.accent
+    local title=label(toolbar,"SNAKE ANIMATOR V1",UDim2.fromOffset(10,5),UDim2.new(1,-20,0,24));title.TextColor3=C.accent
     local dock=frame(gui,UDim2.new(0,10,1,-166),UDim2.new(1,-20,0,154),C.panel);dock.Name="SnakeTimelineDock";dock.ZIndex=20;corner(dock,10)
     local targetLabel=label(dock,"Toque numa peça na cena",UDim2.fromOffset(10,5),UDim2.new(.7,-12,0,24));targetLabel.TextTruncate=Enum.TextTruncate.AtEnd
     local miniTime=box(dock,"0",UDim2.new(.7,0,0,5),UDim2.new(.3,-10,0,28));miniTime.PlaceholderText="Tempo da cena"
     local rulerMini=frame(dock,UDim2.fromOffset(12,80),UDim2.new(1,-24,0,38),C.bg);rulerMini.Name="SnakeScrub";rulerMini.Active=true;corner(rulerMini,6)
     local marker=frame(rulerMini,UDim2.new(),UDim2.fromOffset(2,38),C.accent);marker.ZIndex=5
     local keyDots=frame(rulerMini,UDim2.new(),UDim2.fromScale(1,1),C.bg);keyDots.BackgroundTransparency=1
-    local dockStatus=label(dock,"",UDim2.fromOffset(12,124),UDim2.new(1,-24,0,24),true)
+    local dockStatus=label(dock,"",UDim2.fromOffset(12,124),UDim2.new(1,-128,0,24),true)
+    dockStatus.Name="SnakeWorkspaceStatus";dockStatus.TextWrapped=false;dockStatus.TextTruncate=Enum.TextTruncate.AtEnd
     local function buttonAt(parent,text,index,total,y,fn,accent)
         return button(parent,text,UDim2.new((index-1)/total,5,0,y),UDim2.new(1/total,-10,0,34),safe(fn),accent)
     end
@@ -4475,6 +5046,26 @@ local function installWorkspaceUI()
     buttonAt(dock,"Key transformação",4,6,39,V5.gizmo.keyTransform,true)
     local auto=buttonAt(dock,"Auto Off",5,6,39,function() assert(not V5.drag,"Finalize o gesto");autoKey=not autoKey;autoButton.Text=autoKey and "Auto-key: On" or "Auto-key: Off" end)
     buttonAt(dock,"Painel",6,6,39,function() window.Visible=not window.Visible;V5.layout() end)
+    function W.saveJSON()
+        assert(not V5.busy and not V5.drag and not V5.camera.active,"Finalize o gesto ou bake antes de gerar o JSON")
+        output(projectJSON(false),"JSON editável pronto: copie e salve fora da sessão.")
+        showPage("Exportar");window.Visible=true;V5.layout()
+        notify("JSON gerado. Use Copiar / selecionar e salve fora da sessão; ainda não é um arquivo salvo.")
+    end
+    function W.showNotice()
+        if W.noticePanel and W.noticePanel.Parent then W.noticePanel:Destroy() end
+        local view=Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize or Vector2.new(960,700)
+        local panel=frame(gui,UDim2.fromScale(.5,.5),UDim2.fromOffset(math.min(470,view.X-24),math.min(300,view.Y-32)),C.panel)
+        panel.Name="SnakeNoticeDetails";panel.AnchorPoint=Vector2.new(.5,.5);panel.ZIndex=60;panel.Active=true;corner(panel,10);W.noticePanel=panel
+        label(panel,"Snake Animator V1 • último aviso",UDim2.fromOffset(12,8),UDim2.new(1,-24,0,32))
+        local area=scroll(panel,UDim2.fromOffset(12,48),UDim2.new(1,-24,1,-106))
+        local notice=V5.notice
+        local text=label(area,notice and notice.text or "Nenhuma mensagem. Toque num membro para começar.",UDim2.fromOffset(4,4),UDim2.new(1,-12,0,0))
+        text.AutomaticSize=Enum.AutomaticSize.Y;text.TextYAlignment=Enum.TextYAlignment.Top;text.TextColor3=notice and notice.bad and C.warn or C.text
+        button(panel,"Fechar aviso",UDim2.new(0,12,1,-46),UDim2.new(1,-24,0,34),function() panel:Destroy();W.noticePanel=nil end)
+    end
+    button(dock,"Aviso",UDim2.new(1,-116,0,123),UDim2.fromOffset(50,26),safe(W.showNotice))
+    button(dock,"JSON",UDim2.new(1,-61,0,123),UDim2.fromOffset(50,26),safe(W.saveJSON),true)
     local function uiHit(position)
         local ok,objects=pcall(function() return playerGui:GetGuiObjectsAtPosition(position.X,position.Y) end)
         if not ok then return false end
@@ -4638,7 +5229,7 @@ local function installWorkspaceUI()
             elseif mode=="uniform" then V5.uniform=not V5.uniform
             elseif mode=="pivot" then V5.opposite=not V5.opposite
             elseif mode=="snap" then V5.snap=not V5.snap
-            elseif mode=="save" then output(projectJSON(false),"JSON pronto: copie e salve fora da sessão.");showPage("Exportar")
+            elseif mode=="save" then W.saveJSON()
             elseif mode=="layout" then V5.compact=not V5.compact;V5.layout()
             elseif mode=="steps" then choices("Precisão dos passos / snap",{{label="Fino: 0.01 studs / 1° / 0.01 escala",value=1},{label="Normal: 0.1 studs / 5° / 0.1 escala",value=2},{label="Largo: 1 stud / 15° / 1 escala",value=3}},function(v)
                 V5.moveStep=({.01,.1,1})[v];V5.angleStep=({1,5,15})[v];V5.scaleStep=({.01,.1,1})[v]
@@ -4693,7 +5284,7 @@ local function installWorkspaceUI()
         if V5.drag or V5.busy or playing or V5.camera.active then return end
         local ctrl=UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
         if ctrl and input.KeyCode==Enum.KeyCode.S then
-            output(projectJSON(false),"JSON pronto: copie e salve fora da sessão.");showPage("Exportar");window.Visible=true;V5.layout();return
+            W.saveJSON();return
         end
         if not ctrl then
             if input.KeyCode==Enum.KeyCode.W then V5.gizmo.mode("move");return
@@ -4726,6 +5317,13 @@ local function installWorkspaceUI()
             local k=keys[i]
             local b=button(keyDots,"◆",UDim2.new(k.t/project.duration,-9,0,3),UDim2.fromOffset(18,30),safe(function() seek(k.t);selectedKey=k;refreshInspector() end));b.BackgroundTransparency=1;b.TextColor3=C.accent
         end
+        if project.cinema and project.cinema.enabled then
+            for _,e in ipairs(project.cinema.events) do
+                local cue=e
+                local b=button(keyDots,"•",UDim2.new(cue.t/project.duration,-7,1,-13),UDim2.fromOffset(14,13),safe(function() seek(cue.t) end))
+                b.TextSize=17;b.BackgroundTransparency=1;b.TextColor3=C.warn
+            end
+        end
         V5.dirty=false
     end
     connect(RunService.RenderStepped,function()
@@ -4743,7 +5341,19 @@ local function installWorkspaceUI()
         play.Text=playing and "Pausar" or "Play";auto.Text=autoKey and "Auto On" or "Auto Off"
         auto.BackgroundColor3=autoKey and C.accent or C.field;auto.TextColor3=autoKey and C.dark or C.text
         for mode,b in pairs(W.tools) do b.BackgroundColor3=gizmoMode==mode and C.accent or C.field;b.TextColor3=gizmoMode==mode and C.dark or C.text end
-        dockStatus.Text=string.format("%s • %s • %s • Explorer: %s",V5.targetMode,V5.space,V5.locked and "travado" or "livre",W.external)
+        local pending=V5.pending and V5.pending.object==selected and V5.pending.unkeyed
+        local notice=V5.notice
+        if notice and notice.bad and os.clock()<notice.untilTime then
+            dockStatus.Text=notice.text;dockStatus.TextColor3=C.warn
+        elseif pending then
+            dockStatus.Text="Pose do gizmo sem key • use Key transformação";dockStatus.TextColor3=C.warn
+        elseif notice and os.clock()<notice.untilTime then
+            dockStatus.Text=notice.text;dockStatus.TextColor3=C.muted
+        else
+            local mode=({limb="Membro",part="Part livre",joint="Junta",rig="Rig inteiro"})[V5.targetMode] or V5.targetMode
+            local state=V5.busy and "Bake em andamento" or V5.camera.active and "Câmera fixa durante o gesto" or playing and "Reproduzindo" or V5.locked and "Seleção travada" or "Pronto para animar"
+            dockStatus.Text=mode.." • "..(V5.space=="world" and "eixos globais" or "eixos locais").." • "..state;dockStatus.TextColor3=C.muted
+        end
         if V5.dirty then miniRefresh() end
         if os.clock()-W.lastPoll<.15 then return end;W.lastPoll=os.clock()
         if V5.busy or V5.drag or playing or V5.locked or V5.camera.active then return end
@@ -4768,5 +5378,209 @@ local function installWorkspaceUI()
 end
 installWorkspaceUI()
 
+local function installCutsceneTools()
+    local T={shot=1,cue=1,preview=false,audio=false,sequence=0,cameras={}};V5.cutscene=T
+    local function defaults()
+        return {version=1,enabled=true,letterbox=.08,allowSkip=true,lockInput=false,restore=false,shots={},events={}}
+    end
+    local function cfg() return assert(project.cinema,"Inicialize a Cutscene primeiro") end
+    local function finite(text,a,b)
+        local n=tonumber(text);assert(n and n==n and n>=a and n<=b,"Valor fora do intervalo");return n
+    end
+    local function id(prefix,c)
+        local used={};for _,s in ipairs(c.shots) do used[s.id]=true end;for _,e in ipairs(c.events) do used[e.id]=true end
+        repeat T.sequence=T.sequence+1 until not used[prefix..T.sequence]
+        return prefix..T.sequence
+    end
+    function T.close()
+        if T.session then T.session.Close();T.session=nil end
+        for camera,state in pairs(T.cameras) do if camera.Parent then pcall(function()
+            camera.CFrame=state.cf;camera.Focus=state.focus;camera.FieldOfView=state.fov;camera.CameraSubject=state.subject;camera.CameraType=state.kind
+        end) end end;T.cameras={}
+    end
+    function T.invalidate() T.close() end
+    function T.stopped(restore)
+        if restore then T.preview=false;T.close()
+        elseif T.session then T.session.Step(playhead,{fire=false,audio=false}) end
+        if T.refresh then T.refresh() end
+    end
+    function T.reset() T.preview=false;T.close();if T.refresh then T.refresh() end end
+    function T.update()
+        if not T.preview or not project.cinema or not project.cinema.enabled or V5.busy or V5.drag or V5.camera.active then return end
+        local ok,err=pcall(function()
+            if not T.session then T.session=Snake.newCinemaSession(project.cinema,{preview=true,duration=project.duration}) end
+            local cf,fov=Snake.cinemaFrame(project.cinema,playhead)
+            local camera=Workspace.CurrentCamera
+            local cameraTracks={}
+            for _,entry in ipairs(compiled) do if entry.track.target.root=="Camera" and #entry.track.keys>0 then cameraTracks[#cameraTracks+1]=entry end end
+            if (cf or #cameraTracks>0) and camera then
+                if not T.cameras[camera] then T.cameras[camera]={cf=camera.CFrame,focus=camera.Focus,fov=camera.FieldOfView,kind=camera.CameraType,subject=camera.CameraSubject} end
+                Snake.apply(cameraTracks,playhead,true)
+                if cf then camera.CameraType=Enum.CameraType.Scriptable;camera.CFrame=cf;camera.FieldOfView=fov;camera.Focus=cf*CFrame.new(0,0,-10) end
+            elseif next(T.cameras) then
+                for cam,state in pairs(T.cameras) do if cam.Parent then cam.CFrame=state.cf;cam.Focus=state.focus;cam.FieldOfView=state.fov;cam.CameraSubject=state.subject;cam.CameraType=state.kind end end
+                T.cameras={}
+            end
+            local looped=T.lastTime and playhead<T.lastTime and playing and 1 or 0
+            T.session.Step(playhead,{fire=T.audio and playing,audio=T.audio and playing,looped=looped,rate=1});T.lastTime=playhead
+        end)
+        if not ok then T.preview=false;T.close();notify("Cutscene: "..tostring(err),true) end
+    end
+    function T.retime(ratio)
+        local c=project.cinema;if not c then return end
+        for _,s in ipairs(c.shots) do s.start=s.start*ratio;s.finish=s.finish*ratio end
+        for _,e in ipairs(c.events) do e.t=e.t*ratio;e.duration=e.duration*ratio end
+        T.close()
+    end
+    local function change(fn)
+        assert(not playing and not V5.busy and not V5.drag and not V5.camera.active,"Pause/finalize o gesto antes de editar Cutscene")
+        local c=clone(project.cinema or defaults())
+        local shotId=c.shots[T.shot] and c.shots[T.shot].id;local cueId=c.events[T.cue] and c.events[T.cue].id
+        local kind,newId=fn(c);Snake.validateCinema(c,project.duration)
+        if kind=="shot" then shotId=newId elseif kind=="cue" then cueId=newId end
+        snapshot(true);project.cinema=c;if not c.enabled then T.preview=false end;T.shot=1;T.cue=1
+        for i,s in ipairs(c.shots) do if s.id==shotId then T.shot=i end end
+        for i,e in ipairs(c.events) do if e.id==cueId then T.cue=i end end
+        T.refresh();T.update()
+    end
+    local page=pages.Cutscene
+    local sc=scroll(page,UDim2.new(),UDim2.fromScale(1,1))
+    local panel=frame(sc,UDim2.new(),UDim2.new(1,-6,0,2150),C.bg)
+    label(panel,"CUTSCENE • planos, áudio, VFX e apresentação",UDim2.fromOffset(4,0),UDim2.new(1,-8,0,40))
+    label(panel,"Mantenha câmera livre para capturar A/B. Prévia explícita; scrubbing não dispara bursts. Faixas normais de rigs, objetos e luz continuam na mesma cena.",UDim2.fromOffset(4,45),UDim2.new(1,-8,0,68),true)
+    button(panel,"Inicializar Cutscene",UDim2.fromOffset(0,123),UDim2.new(1,0,0,34),safe(function()
+        change(function(c) c.enabled=true end);notify("Cutscene inicializada. Adicione planos e cues; nenhum asset é baixado pelo editor.")
+    end),true)
+    local enabled=button(panel,"Cutscene: Off",UDim2.fromOffset(0,168),UDim2.new(.5,-4,0,32),safe(function() cfg();change(function(c) c.enabled=not c.enabled end) end))
+    local preview=button(panel,"Prévia cutscene: Off",UDim2.new(.5,4,0,168),UDim2.new(.5,-4,0,32),safe(function()
+        cfg();assert(not V5.drag and not V5.busy,"Finalize gesto/bake");T.close();releaseCamera();T.preview=not T.preview;T.lastTime=nil;T.refresh();T.update()
+    end))
+    local audio=button(panel,"Prévia áudio/VFX: Off",UDim2.fromOffset(0,211),UDim2.new(1,0,0,32),safe(function()
+        cfg();T.audio=not T.audio;T.close();T.refresh();T.update()
+    end))
+    button(panel,"Reproduzir cutscene do início",UDim2.fromOffset(0,254),UDim2.new(1,0,0,36),safe(function()
+        cfg();assert(not V5.busy and not V5.drag,"Finalize gesto/bake");stopPreview(false);T.close();releaseCamera();T.preview=true;playhead=0;T.lastTime=nil;playPause();T.refresh();T.update()
+    end),true)
+    label(panel,"PLANOS DE CÂMERA • nome / início / fim",UDim2.fromOffset(4,302),UDim2.new(1,-8,0,30))
+    local shotName=box(panel,"Plano",UDim2.fromOffset(0,341),UDim2.new(1,0,0,32))
+    local shotStart=box(panel,"0",UDim2.fromOffset(0,383),UDim2.new(.5,-4,0,32))
+    local shotEnd=box(panel,"2",UDim2.new(.5,4,0,383),UDim2.new(.5,-4,0,32))
+    local shots=scroll(panel,UDim2.fromOffset(0,426),UDim2.new(1,0,0,125))
+    button(panel,"+ Plano da câmera atual",UDim2.fromOffset(0,562),UDim2.new(1,0,0,34),safe(function()
+        local camera=assert(Workspace.CurrentCamera,"Câmera ausente");local cf,fov=Snake.pack(camera.CFrame),camera.FieldOfView
+        local a,b=finite(shotStart.Text,0,project.duration),finite(shotEnd.Text,0,project.duration);local name=shotName.Text
+        change(function(c) c.shots[#c.shots+1]={id=id("shot",c),name=name,start=a,finish=b,from=cf,to=clone(cf),fov0=fov,fov1=fov,ease="smooth"};return "shot",c.shots[#c.shots].id end)
+    end))
+    local function capture(which)
+        local c=cfg();assert(c.shots[T.shot],"Selecione um plano");assert(not T.preview,"Desligue Prévia cutscene para posicionar/capturar a câmera livre")
+        local cam=assert(Workspace.CurrentCamera);local value,fov=Snake.pack(cam.CFrame),cam.FieldOfView
+        change(function(copy) local s=copy.shots[T.shot];s[which]=value;s[which=="from" and "fov0" or "fov1"]=fov end)
+    end
+    button(panel,"Capturar A + FOV",UDim2.fromOffset(0,607),UDim2.new(.5,-4,0,32),safe(function() capture("from") end))
+    button(panel,"Capturar B + FOV",UDim2.new(.5,4,0,607),UDim2.new(.5,-4,0,32),safe(function() capture("to") end))
+    local curve=button(panel,"Curva do plano",UDim2.fromOffset(0,650),UDim2.new(.5,-4,0,32),safe(function()
+        assert(cfg().shots[T.shot],"Selecione um plano")
+        choices("Movimento A → B (cortes entre planos)",{{label="Linear",value="linear"},{label="Suave",value="smooth"},{label="Suave +",value="smoother"},{label="Fixo em A / hold",value="hold"}},function(v) change(function(c) c.shots[T.shot].ease=v end) end)
+    end))
+    button(panel,"Salvar nome / tempos",UDim2.new(.5,4,0,650),UDim2.new(.5,-4,0,32),safe(function()
+        local name,a,b=shotName.Text,finite(shotStart.Text,0,project.duration),finite(shotEnd.Text,0,project.duration)
+        change(function(c) local s=assert(c.shots[T.shot],"Selecione um plano");s.name=name;s.start=a;s.finish=b end)
+    end))
+    button(panel,"Olhar para selecionado",UDim2.fromOffset(0,693),UDim2.new(.5,-4,0,32),safe(function()
+        local object=selected and selected:IsA("JointInstance") and selected.Part1 or selected
+        assert(object and (object:IsA("BasePart") or object:IsA("Model") or object:IsA("Attachment")),"Selecione Part/Model/Attachment de foco")
+        local loc=Snake.locate(object);change(function(c) assert(c.shots[T.shot],"Selecione plano").lookAt=loc end)
+    end))
+    button(panel,"Remover foco / usar A-B",UDim2.new(.5,4,0,693),UDim2.new(.5,-4,0,32),safe(function() change(function(c) assert(c.shots[T.shot],"Selecione plano").lookAt=nil end) end))
+    button(panel,"Ir ao início do plano",UDim2.fromOffset(0,736),UDim2.new(.5,-4,0,32),safe(function() local s=assert(cfg().shots[T.shot]);stopPreview(false);previewAt(s.start,true);refreshTimeline() end))
+    button(panel,"Excluir plano",UDim2.new(.5,4,0,736),UDim2.new(.5,-4,0,32),safe(function() change(function(c) assert(c.shots[T.shot]);table.remove(c.shots,T.shot) end) end))
+    label(panel,"Planos não se sobrepõem. Dois planos adjacentes fazem corte no limite. A-B interpola posição, rotação e FOV. Nos intervalos sem plano, a câmera normal/faixas de câmera assumem.",UDim2.fromOffset(4,781),UDim2.new(1,-8,0,76),true)
+    label(panel,"CUES • início / duração / texto ou nome",UDim2.fromOffset(4,869),UDim2.new(1,-8,0,30))
+    local cueStart=box(panel,"0",UDim2.fromOffset(0,909),UDim2.new(.5,-4,0,32))
+    local cueDuration=box(panel,"2",UDim2.new(.5,4,0,909),UDim2.new(.5,-4,0,32))
+    local cueText=box(panel,"Minha legenda",UDim2.fromOffset(0,952),UDim2.new(1,0,0,65));cueText.MultiLine=true;cueText.TextWrapped=true
+    local speaker=box(panel,"",UDim2.fromOffset(0,1028),UDim2.new(1,0,0,32));speaker.PlaceholderText="Nome do falante (legenda)"
+    label(panel,"Volume (0–3) / velocidade som (0.05–4) / partículas",UDim2.fromOffset(4,1071),UDim2.new(1,-8,0,42),true)
+    local volume=box(panel,"1",UDim2.fromOffset(0,1123),UDim2.new(1/3,-4,0,32))
+    local rate=box(panel,"1",UDim2.new(1/3,2,0,1123),UDim2.new(1/3,-4,0,32))
+    local count=box(panel,"30",UDim2.new(2/3,2,0,1123),UDim2.new(1/3,-4,0,32))
+    local function shortName(text)
+        local n=math.min(100,#text)
+        while n>0 and n<#text and string.byte(text,n+1)>=128 and string.byte(text,n+1)<192 do n=n-1 end
+        return string.sub(text,1,n)
+    end
+    local function event(kind)
+        local e={t=finite(cueStart.Text,0,project.duration),duration=finite(cueDuration.Text,0,project.duration),name=shortName(cueText.Text),kind=kind}
+        if kind=="subtitle" then e.text=cueText.Text;e.speaker=speaker.Text
+        elseif kind=="fadeIn" or kind=="fadeOut" then e.kind="fade";e.from=kind=="fadeIn" and 1 or 0;e.to=1-e.from
+        elseif kind=="sound" then assert(selected and selected:IsA("Sound"),"Selecione um Sound na Cena/Explorer");e.target=Snake.locate(selected);e.volume=finite(volume.Text,0,3);e.rate=finite(rate.Text,.05,4)
+        elseif kind=="emit" then assert(selected and selected:IsA("ParticleEmitter"),"Selecione um ParticleEmitter");e.target=Snake.locate(selected);e.count=math.floor(finite(count.Text,1,1000));e.duration=0
+        elseif kind=="marker" then e.text=cueText.Text;e.duration=0 end
+        change(function(c) e.id=id("cue",c);c.events[#c.events+1]=e;return "cue",e.id end)
+    end
+    button(panel,"+ Legenda",UDim2.fromOffset(0,1167),UDim2.new(.5,-4,0,32),safe(function() event("subtitle") end))
+    button(panel,"+ Marcador",UDim2.new(.5,4,0,1167),UDim2.new(.5,-4,0,32),safe(function() event("marker") end))
+    button(panel,"+ Fade entrada",UDim2.fromOffset(0,1210),UDim2.new(.5,-4,0,32),safe(function() event("fadeIn") end))
+    button(panel,"+ Fade saída",UDim2.new(.5,4,0,1210),UDim2.new(.5,-4,0,32),safe(function() event("fadeOut") end))
+    button(panel,"+ Som selecionado",UDim2.fromOffset(0,1253),UDim2.new(.5,-4,0,32),safe(function() event("sound") end))
+    button(panel,"+ Burst selecionado",UDim2.new(.5,4,0,1253),UDim2.new(.5,-4,0,32),safe(function() event("emit") end))
+    local cues=scroll(panel,UDim2.fromOffset(0,1296),UDim2.new(1,0,0,149))
+    button(panel,"Salvar cue selecionado",UDim2.fromOffset(0,1456),UDim2.new(.5,-4,0,34),safe(function()
+        local t,d=finite(cueStart.Text,0,project.duration),finite(cueDuration.Text,0,project.duration);local name=cueText.Text;local voice=speaker.Text
+        local gain,speed,amount=finite(volume.Text,0,3),finite(rate.Text,.05,4),math.floor(finite(count.Text,1,1000))
+        change(function(c)
+            local e=assert(c.events[T.cue],"Selecione um cue");e.t=t;e.duration=(e.kind=="marker" or e.kind=="emit") and 0 or d;e.name=shortName(name)
+            if e.kind=="subtitle" then e.text=name;e.speaker=voice elseif e.kind=="marker" then e.text=name elseif e.kind=="sound" then e.volume=gain;e.rate=speed elseif e.kind=="emit" then e.count=amount end
+        end)
+    end))
+    button(panel,"Excluir cue",UDim2.new(.5,4,0,1456),UDim2.new(.5,-4,0,34),safe(function() change(function(c) assert(c.events[T.cue],"Selecione cue");table.remove(c.events,T.cue) end) end))
+    button(panel,"Ir ao cue selecionado",UDim2.fromOffset(0,1501),UDim2.new(1,0,0,32),safe(function() local e=assert(cfg().events[T.cue]);stopPreview(false);previewAt(e.t,true);refreshTimeline() end))
+    label(panel,"Sons e bursts usam clones locais temporários: não param o som original nem limpam partículas alheias. Selecione Sound/Emitter já existente. IDs de áudio dependem da permissão do Roblox.",UDim2.fromOffset(4,1544),UDim2.new(1,-8,0,86),true)
+    label(panel,"APRESENTAÇÃO • altura das barras (0–0.25)",UDim2.fromOffset(4,1642),UDim2.new(1,-8,0,32))
+    local bars=box(panel,"0.08",UDim2.fromOffset(0,1685),UDim2.new(.4,-4,0,32))
+    button(panel,"Salvar letterbox",UDim2.new(.4,4,0,1685),UDim2.new(.6,-4,0,32),safe(function() local value=finite(bars.Text,0,.25);change(function(c) c.letterbox=value end) end))
+    local skip=button(panel,"Pular cena: On",UDim2.fromOffset(0,1728),UDim2.new(1,0,0,32),safe(function() change(function(c) c.allowSkip=not c.allowSkip end) end))
+    local lock=button(panel,"Bloquear comandos: Off",UDim2.fromOffset(0,1771),UDim2.new(1,0,0,32),safe(function() change(function(c) c.lockInput=not c.lockInput end) end))
+    local restore=button(panel,"Restaurar objetos ao terminar: Off",UDim2.fromOffset(0,1814),UDim2.new(1,0,0,32),safe(function() change(function(c) c.restore=not c.restore end) end))
+    button(panel,"Verificar cena / alvos",UDim2.fromOffset(0,1857),UDim2.new(1,0,0,36),safe(function()
+        Snake.validate(project)
+        local lines={"SNAKE ANIMATOR V1 • verificação",#project.tracks.." faixas",project.body and not project.body.baked and "ATENÇÃO: Body bake pendente" or "Body: sem pendência declarada"}
+        local missing=0
+        for _,tr in ipairs(project.tracks) do if not Snake.resolve(tr.target) then missing=missing+1;lines[#lines+1]="Alvo ausente: "..tr.label end end
+        if project.cinema then
+            lines[#lines+1]=#project.cinema.shots.." planos / "..#project.cinema.events.." cues"
+            for _,e in ipairs(project.cinema.events) do if e.target and not Snake.resolve(e.target) then missing=missing+1;lines[#lines+1]="Cue sem alvo: "..e.name end end
+            for _,s in ipairs(project.cinema.shots) do if s.lookAt and not Snake.resolve(s.lookAt) then missing=missing+1;lines[#lines+1]="Foco ausente: "..s.name end end
+        end
+        lines[#lines+1]=missing.." alvos ausentes. Isto não testa permissões dos assets, física nem replicação."
+        output(table.concat(lines,"\n"),"Diagnóstico de referências, não uma certificação no motor.");showPage("Exportar")
+    end))
+    label(panel,"Exporte Client-side ou Server-side / todos normalmente. Use o Receptor desta edição (formato 6). Pause/Resume/Seek/SetRate são métodos do controller local; marcadores chamam OnMarker, nunca código vindo do JSON.",UDim2.fromOffset(4,1906),UDim2.new(1,-8,0,100),true)
+    local summary=label(panel,"Inicialize para começar.",UDim2.fromOffset(4,2018),UDim2.new(1,-8,0,120),true)
+    function T.refresh()
+        for _,o in ipairs(shots:GetChildren()) do o:Destroy() end
+        for _,o in ipairs(cues:GetChildren()) do o:Destroy() end
+        local c=project.cinema
+        enabled.Text=c and c.enabled and "Cutscene: On" or "Cutscene: Off"
+        preview.Text=T.preview and "Prévia cutscene: On" or "Prévia cutscene: Off";audio.Text=T.audio and "Prévia áudio/VFX: On" or "Prévia áudio/VFX: Off"
+        if not c then summary.Text="Inicialize para começar.";return end
+        for i,s in ipairs(c.shots) do
+            button(shots,string.format("%s • %.2f → %.2fs",s.name,s.start,s.finish),UDim2.fromOffset(2,(i-1)*35),UDim2.new(1,-8,0,31),function() T.shot=i;T.refresh() end,i==T.shot)
+        end
+        for i,e in ipairs(c.events) do
+            button(cues,string.format("%s • %.2fs • %s",e.kind,e.t,e.name),UDim2.fromOffset(2,(i-1)*35),UDim2.new(1,-8,0,31),function() T.cue=i;T.refresh() end,i==T.cue)
+        end
+        local s=c.shots[T.shot]
+        if s then shotName.Text=s.name;shotStart.Text=tostring(s.start);shotEnd.Text=tostring(s.finish);curve.Text="Curva: "..s.ease end
+        local e=c.events[T.cue]
+        if e then cueStart.Text=tostring(e.t);cueDuration.Text=tostring(e.duration);cueText.Text=e.text or e.name;speaker.Text=e.speaker or "";volume.Text=tostring(e.volume or 1);rate.Text=tostring(e.rate or 1);count.Text=tostring(e.count or 30) end
+        bars.Text=tostring(c.letterbox);skip.Text=c.allowSkip and "Pular cena: On" or "Pular cena: Off";lock.Text=c.lockInput and "Bloquear comandos: On" or "Bloquear comandos: Off";restore.Text=c.restore and "Restaurar objetos ao terminar: On" or "Restaurar objetos ao terminar: Off"
+        summary.Text=string.format("%d planos • %d cues\nPrévia não bloqueia comandos do jogador. Scrub não emite bursts. Planos têm prioridade sobre faixas normais de câmera. Retiming escala intervalos; não altera o tom/velocidade dos clips de som.",#c.shots,#c.events)
+    end
+    connect(RunService.RenderStepped,function() if alive and T.preview and not playing then T.update() end end)
+    T.refresh()
+end
+installCutsceneTools()
+
 showPage("Pose");refreshAll();window.Visible=false
-notify("V5 • Toque na peça no mundo. W/E/R: mover/girar/escalar. Salve o JSON antes de sair.")
+notify("Snake Animator V1 • Toque na peça no mundo. W/E/R: mover/girar/escalar. Salve o JSON antes de sair.")
