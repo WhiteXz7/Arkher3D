@@ -6,7 +6,7 @@
    1) Cole ESTE ARQUIRO INTEIRO num LocalScript:
       aba Scripting/Scripts > "+" > LocalScript > colar > salvar
    2) DÊ PLAY uma vez e volte pro modo edit
-   3) Toque no - (arraste-o pra um canto vazio) e ative a IA
+   3) Toque no 🏛 (arraste-o pra um canto vazio) e ative a IA
       UMA VEZ SÓ: botão ⚙ no título do painel
         • conta grátis: https://puter.com
         • token: https://puter.com/dashboard > "Create token"
@@ -1599,7 +1599,7 @@ local AI_STATE_NAME = "Roblox3D_AI_State"
 local AI_DEFAULTS = {
     base = "https://api.puter.com/puterai/openai/v1",
     key = "",
-    model = "gpt-5.4-nano",
+    model = "anthropic:anthropic/claude-sonnet-5",
 }
 
 local function loadCfg()
@@ -1684,7 +1684,7 @@ local function scene2v2(data)
     if not out then return nil, err end
     return out
 end
-local function callLLM(cfg, prompt, maxTokens)
+local function callLLM(cfg, systemPrompt, userPrompt, maxTokens)
     local req = {
         Url = cfg.base .. "/chat/completions",
         Method = "POST",
@@ -1724,6 +1724,48 @@ local function callLLM(cfg, prompt, maxTokens)
         return nil, "a IA respondeu vazio — tente de novo"
     end
     return text
+end
+
+local PUTER_MODELS_URL = "https://api.puter.com/puterai/chat/models"
+local modelCache = nil
+
+-- lista de modelos: Puter usa endpoint proprio (publico); qualquer outro
+-- provedor OpenAI-compatible (Groq, OpenRouter, Ollama...) usa GET /models
+local function fetchModels(cfg)
+    if modelCache then return modelCache end
+    local url, hdrs = PUTER_MODELS_URL, nil
+    if cfg and cfg.base and not cfg.base:find("puter", 1, true) then
+        url = cfg.base .. "/models"
+        if cfg.key and cfg.key ~= "" then
+            hdrs = {["Authorization"] = "Bearer " .. cfg.key}
+        end
+    end
+    local ok, body = pcall(function()
+        return HttpService:GetAsync(url, true, hdrs)
+    end)
+    if not ok then
+        local ok2, resp = pcall(function()
+            return HttpService:RequestAsync({Url = url, Method = "GET", Headers = hdrs})
+        end)
+        if ok2 and type(resp) == "table" and resp.Success then
+            body = resp.Body
+        else
+            return nil, "não consegui baixar a lista (" .. tostring(body):sub(1, 90) .. ")"
+        end
+    end
+    local okd, data = pcall(function() return HttpService:JSONDecode(body) end)
+    if not okd or type(data) ~= "table" then return nil, "lista inválida" end
+    local raw = data.models or data.data or data
+    local out = {}
+    for _, m in ipairs(raw) do
+        local mid = m
+        if type(m) == "table" then mid = m.id or m.name or m.model end
+        if type(mid) == "string" and mid ~= "" then out[#out + 1] = mid end
+    end
+    if #out == 0 then return nil, "lista vazia" end
+    table.sort(out)
+    modelCache = out
+    return out
 end
 
 local function validateLLM(cfg)
@@ -1978,13 +2020,14 @@ local building = false
 
 local MAT_TO_TEX = {
     [Enum.Material.Wood] = "madeira",
-    [Enum.Material.Granite] = "pedra",
+    [Enum.Material.Slate] = "pedra", [Enum.Material.Granite] = "pedra",
     [Enum.Material.Concrete] = "pedra", [Enum.Material.Basalt] = "basalto",
     [Enum.Material.Brick] = "tijolo",
     [Enum.Material.Marble] = "marmore",
     [Enum.Material.Metal] = "metal", [Enum.Material.CorrodedMetal] = "metal_escuro",
+    [Enum.Material.Gold] = "dourado", [Enum.Material.Silver] = "prata",
     [Enum.Material.Grass] = "grama", [Enum.Material.Sand] = "areia",
-    [Enum.Material.Fabric] = "lona",
+    [Enum.Material.Foliage] = "folha", [Enum.Material.Fabric] = "lona",
     [Enum.Material.Leather] = "couro", [Enum.Material.Ice] = "gelo",
     [Enum.Material.Water] = "agua",
 }
@@ -2080,7 +2123,7 @@ local function setupGui(player)
     toggle.Position = UDim2.new(0, 10, 0.5, -27)
     toggle.BackgroundColor3 = Color3.fromRGB(38, 42, 52)
     toggle.BackgroundTransparency = 0.15
-    toggle.Text = "🛠️"
+    toggle.Text = "🏛"
     toggle.TextSize = 26
     toggle.Font = Enum.Font.Gotham
     toggle.AutoButtonColor = true
@@ -2112,7 +2155,7 @@ local function setupGui(player)
     title.Size = UDim2.new(1, -100, 1, 0)
     title.Position = UDim2.new(0, 14, 0, 0)
     title.BackgroundTransparency = 1
-    title.Text = "ARKHER 3D AI"
+    title.Text = "🤖 Roblox3D v2 — me peça um modelo"
     title.TextColor3 = Color3.fromRGB(235, 238, 245)
     title.Font = Enum.Font.GothamMedium
     title.TextSize = 15
@@ -2154,7 +2197,7 @@ local function setupGui(player)
 
     -- ===== caixa de ativação da IA (visível até colocar o token) =====
     local setupBox = Instance.new("Frame")
-    setupBox.Size = UDim2.new(1, -28, 0, 196)
+    setupBox.Size = UDim2.new(1, -28, 0, 232)
     setupBox.Position = UDim2.new(0, 14, 0, 58)
     setupBox.BackgroundColor3 = Color3.fromRGB(30, 33, 42)
     makeCorner(setupBox, 10)
@@ -2195,11 +2238,22 @@ local function setupGui(player)
     setupLabel("🔑 Ativar a IA (uma vez só)", 6, 18, 13, Color3.fromRGB(240, 243, 250))
     setupLabel("1) conta grátis em puter.com\n2) dashboard → \"Create token\"\n3) cole o token abaixo", 27, 38, 11, Color3.fromRGB(160, 168, 185))
     local keyField = setupField("token (puter.com/dashboard → Create token)", 69, aiCfg.key)
-    local modelField = setupField("modelo (deixe como está, ou: claude-sonnet-5)", 99, aiCfg.model)
-    local baseField = setupField("URL da API — Puter já vem; Groq: https://api.groq.com/openai/v1", 129, aiCfg.base)
+    local modelField = setupField("modelo — digite pra filtrar (ex.: claude, gpt, grok)", 99, aiCfg.model)
+    local pickBtn = Instance.new("TextButton")
+    pickBtn.Size = UDim2.new(1, -20, 0, 24)
+    pickBtn.Position = UDim2.new(0, 10, 0, 129)
+    pickBtn.BackgroundColor3 = Color3.fromRGB(52, 58, 74)
+    pickBtn.Text = "📋 ver TODOS os modelos do Puter"
+    pickBtn.TextColor3 = Color3.fromRGB(205, 212, 228)
+    pickBtn.Font = Enum.Font.GothamMedium
+    pickBtn.TextSize = 12
+    makeCorner(pickBtn, 7)
+    pickBtn.Parent = setupBox
+
+    local baseField = setupField("URL da API — Puter já vem; Groq: https://api.groq.com/openai/v1", 159, aiCfg.base)
     local connectBtn = Instance.new("TextButton")
     connectBtn.Size = UDim2.new(1, -20, 0, 28)
-    connectBtn.Position = UDim2.new(0, 10, 0, 159)
+    connectBtn.Position = UDim2.new(0, 10, 0, 193)
     connectBtn.BackgroundColor3 = Color3.fromRGB(76, 110, 245)
     connectBtn.Text = "Ativar IA ✅"
     connectBtn.TextColor3 = Color3.new(1, 1, 1)
@@ -2207,7 +2261,126 @@ local function setupGui(player)
     connectBtn.TextSize = 13
     makeCorner(connectBtn, 7)
     connectBtn.Parent = setupBox
-    local setupErr = setupLabel("", 189, 12, 10, Color3.fromRGB(255, 130, 130), false)
+    local setupErr = setupLabel("", 223, 12, 10, Color3.fromRGB(255, 130, 130), false)
+
+    -- ===== seletor com TODOS os modelos do Puter =====
+    local pickPanel = Instance.new("Frame")
+    pickPanel.Size = UDim2.new(1, -28, 1, -70)
+    pickPanel.Position = UDim2.new(0, 14, 0, 58)
+    pickPanel.BackgroundColor3 = Color3.fromRGB(26, 29, 38)
+    pickPanel.Visible = false
+    pickPanel.ZIndex = 5
+    makeCorner(pickPanel, 10)
+    pickPanel.Parent = panel
+
+    local pickSearch = Instance.new("TextBox")
+    pickSearch.Size = UDim2.new(1, -90, 0, 26)
+    pickSearch.Position = UDim2.new(0, 10, 0, 8)
+    pickSearch.BackgroundColor3 = Color3.fromRGB(42, 46, 58)
+    pickSearch.PlaceholderText = "filtrar… (claude, gpt, grok, free)"
+    pickSearch.PlaceholderColor3 = Color3.fromRGB(110, 116, 130)
+    pickSearch.Text = ""
+    pickSearch.TextColor3 = Color3.fromRGB(235, 238, 245)
+    pickSearch.Font = Enum.Font.Gotham
+    pickSearch.TextSize = 12
+    pickSearch.ClearTextOnFocus = false
+    pickSearch.ZIndex = 6
+    makeCorner(pickSearch, 7)
+    pickSearch.Parent = pickPanel
+
+    local pickClose = Instance.new("TextButton")
+    pickClose.Size = UDim2.fromOffset(66, 26)
+    pickClose.Position = UDim2.new(1, -76, 0, 8)
+    pickClose.BackgroundColor3 = Color3.fromRGB(60, 66, 84)
+    pickClose.Text = "fechar"
+    pickClose.TextColor3 = Color3.fromRGB(220, 226, 240)
+    pickClose.Font = Enum.Font.GothamMedium
+    pickClose.TextSize = 12
+    pickClose.ZIndex = 6
+    makeCorner(pickClose, 7)
+    pickClose.Parent = pickPanel
+
+    local pickInfo = Instance.new("TextLabel")
+    pickInfo.Size = UDim2.new(1, -20, 0, 14)
+    pickInfo.Position = UDim2.new(0, 10, 0, 38)
+    pickInfo.BackgroundTransparency = 1
+    pickInfo.Text = "carregando…"
+    pickInfo.TextColor3 = Color3.fromRGB(150, 158, 178)
+    pickInfo.Font = Enum.Font.Gotham
+    pickInfo.TextSize = 11
+    pickInfo.TextXAlignment = Enum.TextXAlignment.Left
+    pickInfo.ZIndex = 6
+    pickInfo.Parent = pickPanel
+
+    local pickList = Instance.new("ScrollingFrame")
+    pickList.Size = UDim2.new(1, -20, 1, -64)
+    pickList.Position = UDim2.new(0, 10, 0, 56)
+    pickList.BackgroundTransparency = 1
+    pickList.BorderSizePixel = 0
+    pickList.ScrollBarThickness = 6
+    pickList.ScrollBarImageColor3 = Color3.fromRGB(90, 96, 110)
+    pickList.CanvasSize = UDim2.new()
+    pickList.ZIndex = 6
+    pickList.Parent = pickPanel
+
+    local pickAll = {}
+    local function renderPick(filter)
+        for _, c in ipairs(pickList:GetChildren()) do
+            if c:IsA("TextButton") then c:Destroy() end
+        end
+        filter = (filter or ""):lower()
+        local y, n = 0, 0
+        for _, mid in ipairs(pickAll) do
+            if filter == "" or mid:lower():find(filter, 1, true) then
+                n = n + 1
+                if n <= 400 then
+                    local b = Instance.new("TextButton")
+                    b.Size = UDim2.new(1, -8, 0, 24)
+                    b.Position = UDim2.new(0, 0, 0, y)
+                    b.BackgroundColor3 = Color3.fromRGB(38, 42, 54)
+                    b.Text = "  " .. mid
+                    b.TextXAlignment = Enum.TextXAlignment.Left
+                    b.TextColor3 = Color3.fromRGB(210, 216, 230)
+                    b.Font = Enum.Font.Gotham
+                    b.TextSize = 12
+                    b.ZIndex = 7
+                    makeCorner(b, 6)
+                    b.Parent = pickList
+                    b.MouseButton1Click:Connect(function()
+                        modelField.Text = mid
+                        pickPanel.Visible = false
+                    end)
+                    y = y + 27
+                end
+            end
+        end
+        pickList.CanvasSize = UDim2.new(0, 0, 0, y)
+        pickInfo.Text = n .. " de " .. #pickAll .. " modelos" .. ((n > 400) and " (mostrando 400 — filtre mais)" or "")
+    end
+
+    pickSearch:GetPropertyChangedSignal("Text"):Connect(function()
+        if #pickAll > 0 then renderPick(pickSearch.Text) end
+    end)
+    pickClose.MouseButton1Click:Connect(function() pickPanel.Visible = false end)
+
+    pickBtn.MouseButton1Click:Connect(function()
+        pickPanel.Visible = true
+        pickSearch.Text = modelField.Text
+        if #pickAll > 0 then
+            renderPick(pickSearch.Text)
+            return
+        end
+        pickInfo.Text = "baixando a lista completa do Puter…"
+        task.spawn(function()
+            local list, err = fetchModels({base = (baseField.Text:match("^%s*(.-)%s*$")), key = keyField.Text:match("^%s*(.-)%s*$")})
+            if not list then
+                pickInfo.Text = "falhou: " .. tostring(err)
+                return
+            end
+            pickAll = list
+            renderPick(pickSearch.Text)
+        end)
+    end)
 
     -- ===== chat =====
     local scroll = Instance.new("ScrollingFrame")
@@ -2353,7 +2526,7 @@ local function setupGui(player)
             return
         end
         if p:find("ajuda") or p == "help" then
-            addMsg("Peça qualquer coisa: favela, capivara, armadura medieval, cabana, castelo, carro, espada, cidade…\nDicas:\n• seja específico (\"ultra detalhado\", \"tudo entrável e mobiliado\")\n• trabalho em 3 etapas: plano → seções → decor (pode levar 1-3 min; o status mostra onde estou)\n• limite: 3000 parts por modelo\n• o modelo aparece NA FRENTE do seu avatar\n• botão Limpar apaga tudo\n• ⚙ (no título) troca token/modelo\n• modelos bons no puter: claude-sonnet-5, gemini-3.1-flash-lite, grok-4-1-fast", Color3.fromRGB(180, 188, 205))
+            addMsg("Peça qualquer coisa: favela, capivara, armadura medieval, cabana, castelo, carro, espada, cidade…\nDicas:\n• seja específico (\"ultra detalhado\", \"tudo entrável e mobiliado\")\n• trabalho em 3 etapas: plano → seções → decor (pode levar 1-3 min; o status mostra onde estou)\n• limite: 3000 parts por modelo\n• o modelo aparece NA FRENTE do seu avatar\n• botão Limpar apaga tudo\n• ⚙ (no título) troca token/modelo\n• 1000+ modelos do Puter no botão 📋 do ⚙ (bons: anthropic:anthropic/claude-sonnet-5, anthropic:anthropic/claude-opus-4-5, google:google/gemini-3.1-flash-lite)", Color3.fromRGB(180, 188, 205))
             return
         end
 
@@ -2636,7 +2809,7 @@ local function setupGui(player)
     end)
 
     -- boas-vindas
-    addMsg("👋 Fala! Sou o Arkher3D — IA DIRETO no script, sem PC. Toque no 🏛 pra abrir/fechar e ARRASTE ele pra um canto vazio da tela.", Color3.fromRGB(200, 208, 225))
+    addMsg("👋 Fala! Sou o Roblox3D v2 — IA DIRETO no script, sem PC. Toque no 🏛 pra abrir/fechar e ARRASTE ele pra um canto vazio da tela.", Color3.fromRGB(200, 208, 225))
     addMsg("Motor novo: até 3000 parts, curvas perfeitas (cúpulas/torres/arco), fusão de peças em mesh real, portas e janelas de verdade. Trabalho em 3 etapas (plano→seções→decor) — demora um pouco mais, fica muito mais detalhado.", Color3.fromRGB(170, 178, 195))
     addMsg("Ex.: \"favela brasileira realista, tudo entrável e mobiliado\", \"capivara realista\", \"armadura medieval completa\", \"cabana de caçador primitivo\"…", Color3.fromRGB(170, 178, 195))
     refreshStatus()
