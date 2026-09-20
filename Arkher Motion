@@ -1,15 +1,13 @@
--- Snake Animator 3 | inicializacao local via executor.
--- Nao concede acesso ao servidor; o modo para todos requer instalacao no seu jogo.
+-- Snake Animator 4 completo: pronto para hospedar como arquivo Lua raw.
 if not game:IsLoaded() then game.Loaded:Wait() end
 while not game:GetService("Players").LocalPlayer do task.wait() end
 game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
-
--- SNAKE ANIMATOR 3.0 / editor visual local para Roblox
--- INSTALACAO: cole TODO este arquivo em um LocalScript de StarterPlayerScripts.
--- De Play, depois toque no botao Snake Animator.
--- Nao requer Delta, executor, HttpGet, require externo nem plugin.
+-- SNAKE ANIMATOR 4.0 / editor visual local para Roblox
+-- Fonte completa: hospede SnakeAnimatorV4.lua como Raw no seu GitHub.
+-- Execute com seu executor dentro do seu projeto Studio Lite.
+-- O editor nao depende de readfile nem de modulos externos.
 -- Exporte o projeto JSON antes de encerrar o Play.
--- Distribuicao: prototipo funcional; nao e equivalente a Blender/Cascadeur.
+-- Valide no Studio Lite; testes automatizados nao executam o motor Roblox.
 -- Nao deixe o editor disponivel para jogadores comuns no jogo publicado.
 
 local RUNTIME_SOURCE = [=[
@@ -203,6 +201,16 @@ local a,b=keys[lo],keys[hi]
 local dt=math.max(0.000001,b.t-a.t)
 local u=(t-a.t)/dt
 local va,vb=decoded(a),decoded(b)
+if a.ease=="hermite" and (typeof(va)=="number" or typeof(va)=="Vector3" or typeof(va)=="CFrame") then
+local isCF=typeof(va)=="CFrame"
+local p0,p1=isCF and va.Position or va,isCF and vb.Position or vb
+local slope=(p1-p0)/dt
+local m0=a.outTangent and Snake.unpack(a.outTangent) or slope
+local m1=b.inTangent and Snake.unpack(b.inTangent) or slope
+local p=hermite(p0,p1,m0,m1,u,dt)
+if isCF then local rot=va:Lerp(vb,u);return CFrame.new(p)*(rot-rot.Position) end
+return p
+end
 if a.ease=="cubic" and (typeof(va)=="number" or typeof(va)=="Vector3" or typeof(va)=="CFrame") then
 local prev,nextKey=keys[math.max(1,lo-1)],keys[math.min(n,hi+1)]
 local vp,vn=decoded(prev),decoded(nextKey)
@@ -271,6 +279,12 @@ for _,loc in ipairs(e.chain) do locator(loc) end
 locator(e.tip);vector(e.offset);vector(e.target);vector(e.pole);value(e.rotation,"CFrame")
 number(e.weight,0,1);number(e.priority or 1,1,10)
 assert(type(e.enabled)=="boolean" and type(e.orient)=="boolean" and type(e.contactOnly)=="boolean","Flags Body inválidas")
+for _,channel in ipairs({"mutes","assistOriginalMutes"}) do
+if e[channel] then
+assert(type(e[channel])=="table" and #e[channel]<=32,"Até 32 intervalos sem IK")
+for _,m in ipairs(e[channel]) do number(m.start,0,duration);number(m.finish,m.start+.000001,duration);number(m.fade,0,(m.finish-m.start)/2) end
+end
+end
 keys(e.keys,"Vector3",1000);keys(e.poles,"Vector3",1000);keys(e.rotations,"CFrame",1000);keys(e.weights,"number",1000)
 assert(type(e.contacts)=="table" and #e.contacts<=32,"Até 32 contatos por controle")
 table.sort(e.contacts,function(a,b) return a.start<b.start end)
@@ -288,8 +302,47 @@ for _,s in ipairs(body.sources) do locator(s.target);value(s.base,"CFrame");keys
 assert(total<=30000,"Base FK excede 30.000 chaves")
 end
 end
+function Snake.validateAssist(cfg,duration)
+if not cfg then return end
+local function n(x,a,b) assert(type(x)=="number" and x==x and x>=a and x<=b,"Parâmetro Motion Assist inválido") end
+local function loc(v) assert(type(v)=="table" and type(v.root)=="string" and type(v.path)=="table" and #v.path<=64,"Alvo Assist inválido") end
+local function value(v,kind)
+assert(type(v)=="table" and v.kind==kind and type(v.data)=="table","Valor Assist inválido")
+assert(#v.data==(kind=="CFrame" and 12 or 3),"Dimensão Assist inválida")
+for _,x in ipairs(v.data) do n(x,-1e8,1e8) end
+Snake.unpack(v)
+end
+loc(cfg.rig)
+assert(type(cfg.supports)=="table" and #cfg.supports<=8,"Até 8 apoios")
+for _,s in ipairs(cfg.supports) do
+loc(s.tip);assert(type(s.name)=="string" and type(s.enabled)=="boolean","Apoio inválido")
+n(s.width,.01,100);n(s.depth,.01,100);n(s.y,-100,100)
+end
+assert(type(cfg.masses)=="table" and #cfg.masses<=180,"Até 180 massas personalizadas")
+for _,m in ipairs(cfg.masses) do loc(m.target);n(m.mass,0,1e6) end
+n(cfg.margin,0,10);n(cfg.contactTolerance,.001,1);n(cfg.maxShift,0,5);n(cfg.iterations,1,16)
+n(cfg.first,0,duration);n(cfg.last,cfg.first+.000001,duration);n(cfg.fade,0,(cfg.last-cfg.first)/2)
+n(cfg.rate,1,240);assert(type(cfg.groundCheck)=="boolean","Validação de chão inválida")
+local f=cfg.flight
+assert(type(f)=="table","Plano de voo inválido")
+n(f.start,0,duration);n(f.finish,f.start+.000001,duration);n(f.gravity,0,1000);n(f.fade,0,(f.finish-f.start)/2)
+assert(type(f.release)=="boolean","Liberação de IK inválida")
+if f.from then value(f.from,"CFrame") end;if f.to then value(f.to,"CFrame") end
+for _,field in ipairs({"rootSource","inputSource"}) do
+if cfg[field] then
+local s=cfg[field];loc(s.target);value(s.base,"CFrame")
+assert(type(s.keys)=="table" and #s.keys<=30000 and type(s.existed)=="boolean","Backup da raiz inválido")
+local previous=-1
+for _,k in ipairs(s.keys) do
+n(k.t,0,duration);assert(k.t-previous>.000001,"Chaves raiz sobrepostas");previous=k.t;value(k.value,"CFrame")
+for _,name in ipairs({"inTangent","outTangent"}) do if k[name] then value(k[name],"Vector3") end end
+end
+assert(s.kind=="flight" or s.kind=="balance","Tipo de operação inválido")
+end
+end
+end
 function Snake.validate(project)
-assert(type(project)=="table" and (project.version==1 or project.version==2 or project.version==3),"Versao de projeto invalida")
+assert(type(project)=="table" and (project.version==1 or project.version==2 or project.version==3 or project.version==4),"Versao de projeto invalida")
 assert(type(project.duration)=="number" and project.duration>0 and project.duration<=600,"Duracao: 0.01 a 600 segundos")
 assert(type(project.tracks)=="table" and #project.tracks<=512,"Limite: 512 faixas")
 local count=0
@@ -303,6 +356,15 @@ assert(type(key.t)=="number" and key.t==key.t and key.t>=0 and key.t<=project.du
 if key.bezier then
 assert(type(key.bezier)=="table" and #key.bezier==4,"Bezier precisa de 4 controles")
 for _,v in ipairs(key.bezier) do assert(type(v)=="number" and v>=0 and v<=1,"Controles Bezier: 0 a 1") end
+end
+for _,field in ipairs({"inTangent","outTangent"}) do
+if key[field] then
+local tangent=Snake.unpack(key[field])
+local expected=key.value.kind=="number" and "number" or "Vector3"
+assert(typeof(tangent)==expected,"Tipo de tangente inválido")
+if expected=="number" then assert(tangent==tangent and math.abs(tangent)<1e9,"Tangente inválida")
+else for _,x in ipairs(key[field].data) do assert(type(x)=="number" and x==x and math.abs(x)<1e9,"Tangente inválida") end end
+end
 end
 local value=Snake.unpack(key.value)
 if typeof(value)=="number" then assert(value==value and math.abs(value)<1e12,"Numero invalido") end
@@ -336,6 +398,7 @@ for _,n in ipairs(v) do assert(type(n)=="number" and n==n and math.abs(n)<1e9,"N
 end
 end
 Snake.validateBody(project.body,project.duration)
+Snake.validateAssist(project.assist,project.duration)
 return project
 end
 function Snake.compile(project)
@@ -440,7 +503,7 @@ end
 ]=]
 
 local SERVER_PREFIX = [=[
--- Snake Animator 3.0 | Script em ServerScriptService
+-- Snake Animator 4.0 | Script em ServerScriptService
 -- Requer SnakeAnimatorReceiver (LocalScript) em StarterPlayerScripts.
 -- Servidor coordena; clientes renderizam. Nao controla hitboxes/fisica no servidor.
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -533,7 +596,7 @@ end)
 bus:FireServer("ready")
 ]=]
 
--- Snake Animator 3.0 | Runtime compartilhado, incorporado aos scripts exportados.
+-- Snake Animator 4.0 | Runtime compartilhado, incorporado aos scripts exportados.
 -- Este arquivo, isoladamente, nao precisa ser instalado.
 local Snake = {}
 local Players = game:GetService("Players")
@@ -731,6 +794,16 @@ function Snake.evaluate(keys,t)
     local dt=math.max(0.000001,b.t-a.t)
     local u=(t-a.t)/dt
     local va,vb=decoded(a),decoded(b)
+    if a.ease=="hermite" and (typeof(va)=="number" or typeof(va)=="Vector3" or typeof(va)=="CFrame") then
+        local isCF=typeof(va)=="CFrame"
+        local p0,p1=isCF and va.Position or va,isCF and vb.Position or vb
+        local slope=(p1-p0)/dt
+        local m0=a.outTangent and Snake.unpack(a.outTangent) or slope
+        local m1=b.inTangent and Snake.unpack(b.inTangent) or slope
+        local p=hermite(p0,p1,m0,m1,u,dt)
+        if isCF then local rot=va:Lerp(vb,u);return CFrame.new(p)*(rot-rot.Position) end
+        return p
+    end
     if a.ease=="cubic" and (typeof(va)=="number" or typeof(va)=="Vector3" or typeof(va)=="CFrame") then
         local prev,nextKey=keys[math.max(1,lo-1)],keys[math.min(n,hi+1)]
         local vp,vn=decoded(prev),decoded(nextKey)
@@ -799,6 +872,12 @@ function Snake.validateBody(body,duration)
         locator(e.tip);vector(e.offset);vector(e.target);vector(e.pole);value(e.rotation,"CFrame")
         number(e.weight,0,1);number(e.priority or 1,1,10)
         assert(type(e.enabled)=="boolean" and type(e.orient)=="boolean" and type(e.contactOnly)=="boolean","Flags Body inválidas")
+        for _,channel in ipairs({"mutes","assistOriginalMutes"}) do
+        if e[channel] then
+            assert(type(e[channel])=="table" and #e[channel]<=32,"Até 32 intervalos sem IK")
+            for _,m in ipairs(e[channel]) do number(m.start,0,duration);number(m.finish,m.start+.000001,duration);number(m.fade,0,(m.finish-m.start)/2) end
+        end
+        end
         keys(e.keys,"Vector3",1000);keys(e.poles,"Vector3",1000);keys(e.rotations,"CFrame",1000);keys(e.weights,"number",1000)
         assert(type(e.contacts)=="table" and #e.contacts<=32,"Até 32 contatos por controle")
         table.sort(e.contacts,function(a,b) return a.start<b.start end)
@@ -817,8 +896,49 @@ function Snake.validateBody(body,duration)
     end
 end
 
+
+function Snake.validateAssist(cfg,duration)
+    if not cfg then return end
+    local function n(x,a,b) assert(type(x)=="number" and x==x and x>=a and x<=b,"Parâmetro Motion Assist inválido") end
+    local function loc(v) assert(type(v)=="table" and type(v.root)=="string" and type(v.path)=="table" and #v.path<=64,"Alvo Assist inválido") end
+    local function value(v,kind)
+        assert(type(v)=="table" and v.kind==kind and type(v.data)=="table","Valor Assist inválido")
+        assert(#v.data==(kind=="CFrame" and 12 or 3),"Dimensão Assist inválida")
+        for _,x in ipairs(v.data) do n(x,-1e8,1e8) end
+        Snake.unpack(v)
+    end
+    loc(cfg.rig)
+    assert(type(cfg.supports)=="table" and #cfg.supports<=8,"Até 8 apoios")
+    for _,s in ipairs(cfg.supports) do
+        loc(s.tip);assert(type(s.name)=="string" and type(s.enabled)=="boolean","Apoio inválido")
+        n(s.width,.01,100);n(s.depth,.01,100);n(s.y,-100,100)
+    end
+    assert(type(cfg.masses)=="table" and #cfg.masses<=180,"Até 180 massas personalizadas")
+    for _,m in ipairs(cfg.masses) do loc(m.target);n(m.mass,0,1e6) end
+    n(cfg.margin,0,10);n(cfg.contactTolerance,.001,1);n(cfg.maxShift,0,5);n(cfg.iterations,1,16)
+    n(cfg.first,0,duration);n(cfg.last,cfg.first+.000001,duration);n(cfg.fade,0,(cfg.last-cfg.first)/2)
+    n(cfg.rate,1,240);assert(type(cfg.groundCheck)=="boolean","Validação de chão inválida")
+    local f=cfg.flight
+    assert(type(f)=="table","Plano de voo inválido")
+    n(f.start,0,duration);n(f.finish,f.start+.000001,duration);n(f.gravity,0,1000);n(f.fade,0,(f.finish-f.start)/2)
+    assert(type(f.release)=="boolean","Liberação de IK inválida")
+    if f.from then value(f.from,"CFrame") end;if f.to then value(f.to,"CFrame") end
+    for _,field in ipairs({"rootSource","inputSource"}) do
+    if cfg[field] then
+        local s=cfg[field];loc(s.target);value(s.base,"CFrame")
+        assert(type(s.keys)=="table" and #s.keys<=30000 and type(s.existed)=="boolean","Backup da raiz inválido")
+        local previous=-1
+        for _,k in ipairs(s.keys) do
+            n(k.t,0,duration);assert(k.t-previous>.000001,"Chaves raiz sobrepostas");previous=k.t;value(k.value,"CFrame")
+            for _,name in ipairs({"inTangent","outTangent"}) do if k[name] then value(k[name],"Vector3") end end
+        end
+        assert(s.kind=="flight" or s.kind=="balance","Tipo de operação inválido")
+    end
+    end
+end
+
 function Snake.validate(project)
-    assert(type(project)=="table" and (project.version==1 or project.version==2 or project.version==3),"Versao de projeto invalida")
+    assert(type(project)=="table" and (project.version==1 or project.version==2 or project.version==3 or project.version==4),"Versao de projeto invalida")
     assert(type(project.duration)=="number" and project.duration>0 and project.duration<=600,"Duracao: 0.01 a 600 segundos")
     assert(type(project.tracks)=="table" and #project.tracks<=512,"Limite: 512 faixas")
     local count=0
@@ -832,6 +952,15 @@ function Snake.validate(project)
             if key.bezier then
                 assert(type(key.bezier)=="table" and #key.bezier==4,"Bezier precisa de 4 controles")
                 for _,v in ipairs(key.bezier) do assert(type(v)=="number" and v>=0 and v<=1,"Controles Bezier: 0 a 1") end
+            end
+            for _,field in ipairs({"inTangent","outTangent"}) do
+                if key[field] then
+                    local tangent=Snake.unpack(key[field])
+                    local expected=key.value.kind=="number" and "number" or "Vector3"
+                    assert(typeof(tangent)==expected,"Tipo de tangente inválido")
+                    if expected=="number" then assert(tangent==tangent and math.abs(tangent)<1e9,"Tangente inválida")
+                    else for _,x in ipairs(key[field].data) do assert(type(x)=="number" and x==x and math.abs(x)<1e9,"Tangente inválida") end end
+                end
             end
             local value=Snake.unpack(key.value)
             if typeof(value)=="number" then assert(value==value and math.abs(value)<1e12,"Numero invalido") end
@@ -865,6 +994,7 @@ function Snake.validate(project)
         end
     end
     Snake.validateBody(project.body,project.duration)
+    Snake.validateAssist(project.assist,project.duration)
     return project
 end
 function Snake.compile(project)
@@ -1241,7 +1371,183 @@ function BodyMath.control(e,t)
         if contact.rotation then rotationValue=Snake.unpack(contact.rotation) end
         weight=weight*blend
     elseif e.contactOnly then weight=0 end
+    for _,m in ipairs(e.mutes or {}) do
+        if t>m.start and t<m.finish then
+            local fade=m.fade or 0
+            local u=fade>0 and math.clamp(math.min((t-m.start)/fade,(m.finish-t)/fade),0,1) or 1
+            weight=weight*(1-u*u*(3-2*u))
+        end
+    end
     return target,pole,weight,e.orient and rotationValue or nil
+end
+
+-- Snake Motion Assist 4: geometria de apoio e trajetória, sem simulação do motor físico.
+local PhysicsMath={}
+local function cross(a,b,c) return (b.X-a.X)*(c.Y-a.Y)-(b.Y-a.Y)*(c.X-a.X) end
+local function dist2(a,b) local x,y=a.X-b.X,a.Y-b.Y;return x*x+y*y end
+function PhysicsMath.hull(points)
+    local p={};for _,v in ipairs(points) do p[#p+1]=Vector2.new(v.X,v.Y) end
+    table.sort(p,function(a,b) return a.X==b.X and a.Y<b.Y or a.X<b.X end)
+    local unique={}
+    for _,v in ipairs(p) do if #unique==0 or dist2(v,unique[#unique])>1e-12 then unique[#unique+1]=v end end
+    if #unique<=2 then return unique end
+    local lower,upper={},{}
+    for _,v in ipairs(unique) do
+        while #lower>=2 and cross(lower[#lower-1],lower[#lower],v)<=1e-10 do table.remove(lower) end
+        lower[#lower+1]=v
+    end
+    for i=#unique,1,-1 do
+        local v=unique[i]
+        while #upper>=2 and cross(upper[#upper-1],upper[#upper],v)<=1e-10 do table.remove(upper) end
+        upper[#upper+1]=v
+    end
+    table.remove(lower);table.remove(upper)
+    for _,v in ipairs(upper) do lower[#lower+1]=v end
+    return lower
+end
+function PhysicsMath.inset(poly,margin)
+    if #poly<3 then return {} end
+    local result={};for _,v in ipairs(poly) do result[#result+1]=v end
+    for i,a in ipairs(poly) do
+        local b=poly[i%#poly+1];local length=math.sqrt(dist2(a,b))
+        if length>1e-8 then
+            local output={}
+            local function side(p) return cross(a,b,p)/length-margin end
+            if #result==0 then return {} end
+            local prev=result[#result];local dp=side(prev)
+            for _,cur in ipairs(result) do
+                local dc=side(cur)
+                if (dp>=-1e-8)~=(dc>=-1e-8) then
+                    local t=dp/(dp-dc)
+                    output[#output+1]=Vector2.new(prev.X+(cur.X-prev.X)*t,prev.Y+(cur.Y-prev.Y)*t)
+                end
+                if dc>=-1e-8 then output[#output+1]=cur end
+                prev,dp=cur,dc
+            end
+            result=output
+        end
+    end
+    return PhysicsMath.hull(result)
+end
+function PhysicsMath.inside(poly,p)
+    if #poly<3 then return false end
+    for i,a in ipairs(poly) do if cross(a,poly[i%#poly+1],p)<-1e-7 then return false end end
+    return true
+end
+function PhysicsMath.closest(poly,p)
+    assert(#poly>0,"Polígono vazio")
+    if PhysicsMath.inside(poly,p) then return p,0 end
+    local best,bestDistance=poly[1],math.huge
+    for i,a in ipairs(poly) do
+        local b=poly[i%#poly+1];local dx,dy=b.X-a.X,b.Y-a.Y
+        local length2=dx*dx+dy*dy
+        local t=length2>1e-12 and math.clamp(((p.X-a.X)*dx+(p.Y-a.Y)*dy)/length2,0,1) or 0
+        local q=Vector2.new(a.X+dx*t,a.Y+dy*t);local d=dist2(p,q)
+        if d<bestDistance then best,bestDistance=q,d end
+    end
+    return best,math.sqrt(bestDistance)
+end
+function PhysicsMath.centerOfMass(samples)
+    local sum,total=Vector3.zero,0
+    for _,s in ipairs(samples) do
+        assert(s.mass>=0 and s.mass==s.mass,"Massa inválida")
+        sum=sum+s.position*s.mass;total=total+s.mass
+    end
+    assert(total>1e-9,"Massa total nula")
+    return sum/total,total
+end
+function PhysicsMath.envelope(t,first,last,fade)
+    if t<first or t>last then return 0 end
+    if fade<=0 then return 1 end
+    local x=math.clamp(math.min((t-first)/fade,(last-t)/fade),0,1)
+    return x*x*(3-2*x)
+end
+function PhysicsMath.ballistic(p0,p1,duration,t,gravity)
+    assert(duration>0 and gravity>=0,"Voo inválido")
+    local a=Vector3.new(0,-gravity,0)
+    local velocity=(p1-p0)/duration-a*(duration/2)
+    return p0+velocity*t+a*(t*t/2),velocity+a*t,velocity
+end
+function PhysicsMath.flightFrame(first,last,start,finish,t,gravity)
+    local duration=finish-start
+    assert(duration>0,"Voo precisa de duração positiva")
+    local pos,velocity=PhysicsMath.ballistic(first.Position,last.Position,duration,t-start,gravity)
+    local orientation=first:Lerp(last,math.clamp((t-start)/duration,0,1))
+    return CFrame.new(pos)*(orientation-orientation.Position),velocity
+end
+function PhysicsMath.sampleTimes(duration,rate,extras)
+    assert(duration>0 and duration<=600 and rate>=1 and rate<=240,"Amostragem inválida")
+    local times={}
+    for i=0,math.ceil(duration*rate) do times[#times+1]=math.min(duration,i/rate) end
+    for _,t in ipairs(extras or {}) do if t>=0 and t<=duration then times[#times+1]=t end end
+    table.sort(times)
+    local result={}
+    for _,t in ipairs(times) do if #result==0 or t-result[#result]>1.01e-6 then result[#result+1]=t end end
+    return result
+end
+function PhysicsMath.copyModel(model)
+    local copy={nodes={},bases={},inbound={},driven={}}
+    for i,n in ipairs(model.nodes) do local c={};for k,v in pairs(n) do c[k]=v end;copy.nodes[i]=c end
+    for k,v in pairs(model.bases) do copy.bases[k]=v end
+    for k,v in pairs(model.inbound) do copy.inbound[k]=v end
+    for k,v in pairs(model.driven or {}) do copy.driven[k]=v end
+    return copy
+end
+function PhysicsMath.shiftRoots(model,delta)
+    for part,cf in pairs(model.bases) do if not model.inbound[part] then model.bases[part]=cf+delta end end
+end
+function PhysicsMath.balanceSearch(evaluate,options)
+    options=options or {}
+    local delta=Vector3.zero
+    local best=evaluate(delta);local initial=best
+    local history={best.distance or math.huge}
+    if not best.valid then return delta,best,{initial=initial,history=history,iterations=0} end
+    local limit=options.maxShift or .5
+    local loops=math.clamp(options.iterations or 6,1,16)
+    local allowedError=math.max(options.contactTolerance or .05,best.contactError or 0)
+    local allowedAngle=math.max(5,best.angle or 0)
+    local iterations=0
+    for i=1,loops do
+        iterations=i
+        if best.distance<=(options.tolerance or .005) then break end
+        local p=Vector2.new(best.com.X,best.com.Z)
+        local goal=PhysicsMath.closest(best.region,p)
+        local correction=Vector3.new(goal.X-p.X,0,goal.Y-p.Y)
+        if correction.Magnitude<1e-7 then break end
+        if correction.Magnitude>.25 then correction=correction.Unit*.25 end
+        local improved=false
+        for _,gain in ipairs({.85,.425,.2125}) do
+            local candidate=delta+correction*gain
+            if candidate.Magnitude>limit then candidate=candidate.Unit*limit end
+            if (candidate-delta).Magnitude>1e-7 then
+                local state=evaluate(candidate)
+                if state.valid and (not best.supportKey or state.supportKey==best.supportKey) and state.distance<best.distance-1e-6 and (state.contactError or 0)<=allowedError+1e-6 and (state.angle or 0)<=allowedAngle+1e-6 then
+                    best=state;delta=candidate;improved=true;break
+                end
+            end
+        end
+        history[#history+1]=best.distance
+        if not improved then break end
+    end
+    return delta,best,{initial=initial,history=history,iterations=iterations}
+end
+-- Derivada de translação de um segmento Hermite explícito. Usada para subdividir
+-- uma trajetória balística anterior sem convertê-la em cordas lineares.
+function PhysicsMath.curveVelocity(keys,t,left)
+    for i=1,#keys-1 do
+        local a,b=keys[i],keys[i+1]
+        local inside=left and t>a.t+1e-8 and t<=b.t+1e-8 or (not left and t>=a.t-1e-8 and t<b.t-1e-8)
+        if inside then
+            if a.ease~="hermite" then return nil end
+            local va,vb=Snake.unpack(a.value),Snake.unpack(b.value)
+            local p0,p1=typeof(va)=="CFrame" and va.Position or va,typeof(vb)=="CFrame" and vb.Position or vb
+            local dt=b.t-a.t;local u=math.clamp((t-a.t)/dt,0,1)
+            local slope=(p1-p0)/dt
+            local m0=a.outTangent and Snake.unpack(a.outTangent) or slope
+            local m1=b.inTangent and Snake.unpack(b.inTangent) or slope
+            return (p0*(6*u*u-6*u)+p1*(-6*u*u+6*u))/dt+m0*(3*u*u-4*u+1)+m1*(3*u*u-2*u),i
+        end
+    end
 end
 
 -- Interface Snake Animator. O arquivo instalavel e gerado com o runtime incorporado.
@@ -1296,7 +1602,7 @@ window.AnchorPoint=Vector2.new(.5,.5);corner(window,12)
 make("UIStroke",window,{Color=C.line,Thickness=1})
 local header=frame(window,UDim2.new(),UDim2.new(1,0,0,47),C.panel);header.Active=true;corner(header,12)
 label(header,"SNAKE / ANIMATOR",UDim2.fromOffset(14,3),UDim2.new(1,-135,0,25))
-label(header,"03  •  body / contacts / motion",UDim2.fromOffset(14,25),UDim2.new(1,-100,0,17),true)
+label(header,"04  •  support / flight / motion",UDim2.fromOffset(14,25),UDim2.new(1,-100,0,17),true)
 local toggle=button(gui,"◈  Snake Animator",UDim2.new(0,12,1,-52),UDim2.fromOffset(166,38),function() window.Visible=not window.Visible;if window.Visible then window.Position=UDim2.fromScale(.5,.5) end end,true)
 button(header,"—",UDim2.new(1,-76,0,8),UDim2.fromOffset(30,30),function() window.Visible=false end)
 local status=label(window,"Pronto. Selecione um objeto ou abra um rig.",UDim2.new(0,12,1,-32),UDim2.new(1,-24,0,27),true)
@@ -1331,7 +1637,7 @@ for i,name in ipairs({"Cena","Pose","Motion","Timeline","Exportar"}) do
 end
 
 local advancedHooks={}
-local project={version=3,name="Snake Scene",duration=5,fps=60,loop=false,tracks={}}
+local project={version=4,name="Snake Scene",duration=5,fps=60,loop=false,tracks={}}
 local selected,selectedProperty,selectedTrack,selectedKey=nil,nil,nil,nil
 local playhead,playing,playStart=0,false,0
 local defaultEase="smooth"
@@ -1370,7 +1676,9 @@ local function clone(t)
     if type(t)~="table" then return t end
     local c={};for k,v in pairs(t) do c[k]=clone(v) end;return c
 end
+local projectRevision=0
 local function snapshot()
+    projectRevision=projectRevision+1
     local units=0
     for _,tr in ipairs(project.tracks) do units=units+#tr.keys end
     for _,pose in ipairs(project.poses or {}) do units=units+#pose.entries end
@@ -1378,10 +1686,12 @@ local function snapshot()
         for _,src in ipairs(project.body.sources or {}) do units=units+#src.keys end
         for _,e in ipairs(project.body.effectors) do for _,channel in ipairs({"keys","poles","rotations","weights"}) do units=units+#e[channel] end end
     end
+    if project.assist then for _,field in ipairs({"rootSource","inputSource"}) do local src=project.assist[field];if src then units=units+#src.keys end end end
     local limit=units>10000 and 4 or (units>3000 and 10 or 40)
     table.insert(undoStack,clone(project));while #undoStack>limit do table.remove(undoStack,1) end
     redoStack={}
     if project.body then project.body.baked=false end
+    if advancedHooks.edited then advancedHooks.edited() end
 end
 local function remember(obj,prop)
     originals[obj]=originals[obj] or {}
@@ -1502,6 +1812,11 @@ connect(durationBox.FocusLost,safe(function()
             for _,c in ipairs(e.contacts) do last=math.max(last,c.finish) end
         end
         for _,src in ipairs(project.body.sources or {}) do for _,k in ipairs(src.keys) do last=math.max(last,k.t) end end
+        for _,e in ipairs(project.body.effectors) do for _,m in ipairs(e.mutes or {}) do last=math.max(last,m.finish) end end
+    end
+    if project.assist then
+        last=math.max(last,project.assist.last,project.assist.flight.finish)
+        for _,field in ipairs({"rootSource","inputSource"}) do local src=project.assist[field];if src then for _,k in ipairs(src.keys) do last=math.max(last,k.t) end end end
     end
     assert(d>=last,"Apague/mova as chaves após "..d.."s antes de reduzir")
     snapshot();project.duration=d;playhead=math.min(playhead,d);refreshTimeline()
@@ -1685,7 +2000,7 @@ button(poseInner,"Aplicar valores",UDim2.fromOffset(0,307),UDim2.new(.5,-4,0,36)
 end))
 button(poseInner,"+ Key",UDim2.new(.5,4,0,307),UDim2.new(.5,-4,0,36),safe(keyCurrent),true)
 autoButton=button(poseInner,"Auto-key: Off",UDim2.fromOffset(0,351),UDim2.new(.5,-4,0,34),function() autoKey=not autoKey;autoButton.Text=autoKey and "Auto-key: On" or "Auto-key: Off" end)
-local easeNames={bezier="Bézier / Motion",linear="Linear",smooth="Suave",smoother="Suave +",cubic="Cúbica / posição",hold="Hold / corte",["in"]="Ease In",out="Ease Out",inout="Ease In-Out"}
+local easeNames={hermite="Hermite / físico",bezier="Bézier / Motion",linear="Linear",smooth="Suave",smoother="Suave +",cubic="Cúbica / posição",hold="Hold / corte",["in"]="Ease In",out="Ease Out",inout="Ease In-Out"}
 local easeOrder={"bezier","linear","smooth","smoother","cubic","hold","in","out","inout"}
 easeButton=button(poseInner,"Curva: Suave",UDim2.new(.5,4,0,351),UDim2.new(.5,-4,0,34),function()
     local items={};for _,k in ipairs(easeOrder) do table.insert(items,{label=easeNames[k],value=k}) end
@@ -1813,7 +2128,7 @@ button(timeline,"Copiar",UDim2.new(.25,2,1,-106),UDim2.new(.25,-4,0,32),safe(fun
 button(timeline,"Colar",UDim2.new(.5,2,1,-106),UDim2.new(.25,-4,0,32),safe(function()
     assert(copiedKey and selected and selectedProperty,"Copie uma chave e escolha um alvo")
     local v=Snake.read(selected,selectedProperty);assert(typeof(v)==copiedKey.value.kind,"Tipos incompatíveis")
-    snapshot();selectedTrack=ensureTrack(selected,selectedProperty);selectedKey=insertKey(selectedTrack,playhead,Snake.unpack(copiedKey.value));selectedKey.ease=copiedKey.ease;selectedKey.bezier=clone(copiedKey.bezier)
+    snapshot();selectedTrack=ensureTrack(selected,selectedProperty);selectedKey=insertKey(selectedTrack,playhead,Snake.unpack(copiedKey.value));selectedKey.ease=copiedKey.ease;selectedKey.bezier=clone(copiedKey.bezier);selectedKey.inTangent=clone(copiedKey.inTangent);selectedKey.outTangent=clone(copiedKey.outTangent)
     previewAt(playhead,true);refreshTimeline()
 end))
 button(timeline,"Apagar ◆",UDim2.new(.75,2,1,-106),UDim2.new(.25,-2,0,32),safe(deleteKey))
@@ -1847,11 +2162,11 @@ end
 connect(exportText:GetPropertyChangedSignal("Text"),fitExport)
 local function projectJSON(playback)
     Snake.validate(project)
-    project.version=3
+    project.version=4
     local data=project
     if playback then
         if project.body and #project.body.effectors>0 then assert(project.body.baked==true,"Body bake pendente. Use Motion → Corpo → Bake corporal antes de exportar") end
-        data={version=3,name=project.name,duration=project.duration,fps=project.fps,loop=project.loop,tracks=project.tracks}
+        data={version=4,name=project.name,duration=project.duration,fps=project.fps,loop=project.loop,tracks=project.tracks}
     end
     return HttpService:JSONEncode(data)
 end
@@ -1891,7 +2206,7 @@ button(exportPage,"Selecionar texto",UDim2.new(0,0,1,-34),UDim2.new(.5,-4,0,32),
     notify("Use Copiar do teclado/menu do aparelho. Não há clipboard de executor.")
 end)
 button(exportPage,"Como integrar?",UDim2.new(.5,4,1,-34),UDim2.new(.5,-4,0,32),function()
-    output("SNAKE ANIMATOR 3 / BODY SOLVER\n\nEditor: LocalScript em StarterPlayerScripts.\nAbra Motion > Corpo para controles, contatos e limites.\nProjetos com Body precisam de Bake corporal atualizado\nantes de exportar. As alterações invalidam o bake.\n\nCLIENT: LocalScript; ONLY_USER_ID filtra seu jogador.\nSERVER: Script em ServerScriptService + Receptor v3\nem StarterPlayerScripts. Um receptor por cliente.\nÉ sincronização visual, não física autoritativa.\n\nRemova a chamada automática final e use\nplaySnakeAnimation() no seu sistema.\nanimation.Stop(true) interrompe e restaura.\n\nExporte JSON antes de parar o Play.\nUse os arquivos 09 e 10 para o demo Body.\nLeia LEIA-ME.md para instalação, limites e exemplos.\nNão há equivalência completa ao Cascadeur,\nauto-physics ou garantia de 240 FPS.\n", "Guia rápido V3 • consulte LEIA-ME.md no pacote.")
+    output("SNAKE ANIMATOR 4 / MOTION ASSIST\n\nEditor: execute o fonte completo no seu executor\ndentro do Studio Lite. Não depende de readfile.\nMotion > Física: apoio e salto.\nAbra Motion > Corpo para controles, contatos e limites.\nProjetos com Body precisam de Bake corporal atualizado\nantes de exportar. As alterações invalidam o bake.\n\nCLIENT: LocalScript; ONLY_USER_ID filtra seu jogador.\nSERVER: Script em ServerScriptService + Receptor v4\nem StarterPlayerScripts. Um receptor por cliente.\nÉ sincronização visual, não física autoritativa.\n\nRemova a chamada automática final e use\nplaySnakeAnimation() no seu sistema.\nanimation.Stop(true) interrompe e restaura.\n\nExporte JSON antes de parar o Play.\nUse os arquivos 09 e 10 para o demo Body.\nLeia LEIA-ME.md para instalação, limites e exemplos.\nNão há equivalência completa ao Cascadeur,\nauto-physics ou garantia de 240 FPS.\n", "Guia rápido V4 • consulte LEIA-ME.md no pacote.")
 end)
 
 -- Gizmos nativos opcionais. Os campos numericos continuam disponiveis no toque.
@@ -1972,9 +2287,10 @@ local function installAdvancedTools()
         if name=="Poses" and A.refreshPoses then A.refreshPoses() end
         if name=="IK" and A.refreshIK then A.refreshIK() end
         if name=="Corpo" and A.body then A.body.refresh() end
+        if name=="Física" and A.physics then A.physics.refresh() end
     end
-    for i,name in ipairs({"Corpo","IK","Curvas","Ghosts","Poses"}) do
-        subButtons[name]=button(motion,name,UDim2.new((i-1)/5,0,0,0),UDim2.new(.2,-4,0,32),function() subTab(name) end)
+    for i,name in ipairs({"Corpo","Física","IK","Curvas","Ghosts","Poses"}) do
+        subButtons[name]=button(motion,name,UDim2.new((i-1)/6,0,0,0),UDim2.new(1/6,-3,0,32),function() subTab(name) end)
         subPages[name]=scroll(motion,UDim2.fromOffset(0,42),UDim2.new(1,0,1,-42))
     end
     local function content(name,height)
@@ -2405,8 +2721,13 @@ local function installAdvancedTools()
         button(panel,"Escalar todos os tempos",UDim2.new(.4,4,0,854),UDim2.new(.6,-4,0,34),safe(function()
             assert(not playing and not A.baking,"Pare a prévia antes de retimar")
             local duration=finite(retimeBox.Text,.01,600)
-            snapshot();local ratio=duration/project.duration
-            for _,tr in ipairs(project.tracks) do for _,key in ipairs(tr.keys) do key.t=key.t*ratio end end
+            local ratio=duration/project.duration
+            if project.assist then assert(project.assist.flight.gravity/(ratio*ratio)<=1000,"Retiming excederia a gravidade máxima de Assist (1000). Use uma razão maior.") end
+            snapshot()
+            for _,tr in ipairs(project.tracks) do for _,key in ipairs(tr.keys) do
+                key.t=key.t*ratio
+                for _,f in ipairs({"inTangent","outTangent"}) do if key[f] then key[f]=Snake.pack(Snake.unpack(key[f])/ratio) end end
+            end end
             if advancedHooks.retime then advancedHooks.retime(ratio) end
             project.duration=duration;playhead=playhead*ratio
             rebuild();refreshAll();A.graphRange=nil;A.dirtyGraph=true;A.ghostDirty=true
@@ -2779,8 +3100,8 @@ local function installAdvancedTools()
         local function sourceFor(object,sources)
             for _,s in ipairs(sources or {}) do if Snake.resolve(s.target)==object then return s end end
         end
-        function B.model(t,sources)
-            local body=cfg();local rig=Snake.resolve(body.rig)
+        function B.model(t,sources,override)
+            local body=override or cfg();local rig=Snake.resolve(body.rig)
             assert(rig and rig:IsA("Model") and rig.Parent,"Rig corporal não encontrado")
             local model={nodes={},bases={},inbound={},driven={}}
             local profiles,sourceMap,trackMap={},{},{}
@@ -2897,21 +3218,31 @@ local function installAdvancedTools()
                     Snake.write(object,"C0",Snake.unpack(source.base))
                 end
             end
+            if A.physics then A.physics.restoreRoot() end
             body.sources=nil;body.baked=false;rebuild();previewAt(playhead,true);refreshTimeline();B.refresh()
         end
-        function B.bake(rate)
+        function B.bake(rate,recipe)
             assert(not playing and not A.baking,"Pause antes do bake")
             local body=cfg();assert(#body.effectors>0,"Crie controles primeiro")
             local sources=captureSources(body)
-            local count=math.ceil(project.duration*rate)+1
+            local extras={}
+            for _,e in ipairs(body.effectors) do
+                for _,channel in ipairs({"keys","poles","weights","rotations"}) do for _,k in ipairs(e[channel]) do extras[#extras+1]=k.t end end
+                for _,c in ipairs(e.contacts) do for _,t in ipairs({c.start,c.finish,c.start+c.fade,c.finish-c.fade}) do extras[#extras+1]=t end end
+                for _,m in ipairs(e.mutes or {}) do for _,t in ipairs({m.start,m.finish,m.start+m.fade,m.finish-m.fade}) do extras[#extras+1]=t end end
+            end
+            for _,t in ipairs(recipe and recipe.times or {}) do extras[#extras+1]=t end
+            local times=PhysicsMath.sampleTimes(project.duration,rate,extras)
+            local count=#times
             local unaffected,new=0,0
             for _,tr in ipairs(project.tracks) do
                 local obj=Snake.resolve(tr.target)
-                if tr.property~="C0" or not sourceFor(obj,sources) then unaffected=unaffected+#tr.keys end
+                if not (tr.property=="C0" and sourceFor(obj,sources)) and not (recipe and tr.property=="Pivot" and obj==recipe.rig) then unaffected=unaffected+#tr.keys end
             end
             for _,s in ipairs(sources) do if not findTrack(Snake.resolve(s.target),"C0") then new=new+1 end end
-            assert(#project.tracks+new<=512 and unaffected+count*#sources<=30000,"Bake excederia 512 faixas ou 30.000 chaves; reduza taxa/duração")
-            local initialProject=project;local originalTime=playhead
+            if recipe and not findTrack(recipe.rig,"Pivot") then new=new+1 end
+            assert(#project.tracks+new<=512 and unaffected+count*(#sources+(recipe and 1 or 0))<=30000,"Bake excederia 512 faixas ou 30.000 chaves; reduza taxa/duração")
+            local initialProject=project;local initialRevision=projectRevision;local originalTime=playhead
             local frozen=Snake.compile(clone(project));local duration=project.duration
             local output={};for i=1,#sources do output[i]={} end
             local overlay=frame(window,UDim2.fromOffset(6,49),UDim2.new(1,-12,1,-58),C.panel);overlay.ZIndex=45;overlay.Active=true
@@ -2920,11 +3251,12 @@ local function installAdvancedTools()
             button(overlay,"Cancelar sem gravar",UDim2.new(.1,0,.6,0),UDim2.new(.8,0,0,38),function() cancelled=true end)
             A.baking=true;B.busy=true;B.live=false;A.pin=false
             local ok,err=pcall(function()
-                for k=0,count-1 do
-                    assert(alive and project==initialProject and not cancelled,"Bake cancelado")
-                    local t=math.min(duration,k/rate)
+                for k,t in ipairs(times) do
+                    assert(alive and project==initialProject and projectRevision==initialRevision and not cancelled,"Bake cancelado")
                     Snake.apply(frozen,t,false)
-                    local model,objects,report=B.solve(t,false,sources,true)
+                    local model,objects,report
+                    if recipe then model,objects,report=recipe.sample(t,sources)
+                    else model,objects,report=B.solve(t,false,sources,true) end
                     worst=math.max(worst,report.error)
                     for _,d in ipairs(report.details) do worstAngle=math.max(worstAngle,d.angle) end
                     for i,source in ipairs(sources) do
@@ -2932,21 +3264,26 @@ local function installAdvancedTools()
                         local index=table.find(objects,object);assert(index,"Junta fora do grafo")
                         output[i][#output[i]+1]={t=t,value=Snake.pack(model.nodes[index].c0),ease="linear"}
                     end
-                    if k%10==0 then progress.Text=string.format("Body bake: %d / %d\nErro máximo: %.4f studs / %.2f graus\nGravação apenas ao concluir.",k+1,count,worst,worstAngle);task.wait() end
+                    if k%10==0 then progress.Text=string.format("Body bake: %d / %d\nErro máximo: %.4f studs / %.2f graus\nGravação apenas ao concluir.",k,count,worst,worstAngle);task.wait() end
                 end
+                assert(alive and project==initialProject and projectRevision==initialRevision and not cancelled,"Bake cancelado")
+                for _,source in ipairs(sources) do assert(Snake.resolve(source.target),"Junta removida durante o bake") end
+                if recipe then assert(recipe.rig.Parent and Snake.resolve(body.rig)==recipe.rig,"Rig removido durante o bake") end
                 snapshot()
                 for i,source in ipairs(sources) do
                     local object=Snake.resolve(source.target);local tr=ensureTrack(object,"C0")
                     tr.keys=output[i]
                 end
+                if recipe then recipe.commit() end
                 body.sources=sources;body.baked=true;body.lastError=worst;body.lastAngle=worstAngle;project.fps=math.max(project.fps,math.min(240,math.ceil(rate)))
             end)
             A.baking=false;B.busy=false
             if overlay.Parent then overlay:Destroy() end
             if alive then
-                rebuild();previewAt(math.min(originalTime,project.duration),true);refreshAll();B.refresh()
+                rebuild();previewAt(math.min(originalTime,project.duration),true);refreshAll();B.refresh();if A.physics then A.physics.refresh() end
                 notify(ok and string.format("Body bake concluído. Erro máx %.4f studs / %.2f°. Confira a cena.",worst,worstAngle) or tostring(err),not ok or worst>.05 or worstAngle>2)
             end
+            return ok,err
         end
         -- Interface corporal: painel rolável com operações explícitas.
         local panel=content("Corpo",2170)
@@ -2958,7 +3295,7 @@ local function installAdvancedTools()
             local rig=getRig();local rest={}
             for _,j in ipairs(rig:GetDescendants()) do if j:IsA("Motor6D") then table.insert(rest,{target=Snake.locate(j),value=Snake.pack(j.C0),limit={mode="free",axis={1,0,0},min=-180,max=180,cone=180}}) end end
             assert(#rest>0 and #rest<=180,"Rig precisa ter 1–180 Motor6Ds")
-            snapshot();project.body={rig=Snake.locate(rig),rest=rest,effectors={},iterations=32,baked=false};B.live=false;B.refresh()
+            snapshot();project.assist=nil;project.body={rig=Snake.locate(rig),rest=rest,effectors={},iterations=32,baked=false};B.live=false;B.refresh()
         end))
         button(panel,"Controles R15",UDim2.new(.5,4,0,100),UDim2.new(.5,-4,0,36),safe(function()
             local body=cfg();local rig=Snake.resolve(body.rig)
@@ -3104,7 +3441,7 @@ local function installAdvancedTools()
         button(panel,"Finalizar em FK",UDim2.new(.5,4,0,1762),UDim2.new(.5,-4,0,32),safe(function()
             assert(cfg().baked,"Atualize o Body bake primeiro")
             choices("Manter só as faixas? Salve o JSON completo antes.",{{label="Cancelar, manter controles Body",value="cancel"},{label="Converter bake em faixas FK normais",value="convert"}},function(v)
-                if v=="convert" then snapshot();project.body=nil;B.live=false;B.gizmo="off";B.result=nil;B.refresh();notify("Bake convertido em faixas FK. Use desfazer para recuperar os controles.") end
+                if v=="convert" then snapshot();project.body=nil;project.assist=nil;B.live=false;B.gizmo="off";B.result=nil;B.refresh();notify("Bake convertido em faixas FK. Use desfazer para recuperar os controles.") end
             end)
         end))
         label(panel,"Bake preserva a base FK para recalcular sem acumular as soluções anteriores. Alterações do projeto marcam o bake como desatualizado. Exporte só após novo bake. Controles não são constraints físicos no servidor.",UDim2.fromOffset(4,1807),UDim2.new(1,-8,0,104),true)
@@ -3190,13 +3527,379 @@ local function installAdvancedTools()
         B.refresh()
     end
 
+    do
+        local P={visible=false,last=nil,selected=1};A.physics=P
+        local B=A.body
+        local function config() return assert(project.assist,"Inicialize a assistência em Motion → Física") end
+        local function rigFor()
+            local b=assert(project.body,"Configure um rig em Corpo primeiro")
+            return assert(Snake.resolve(b.rig),"Rig não encontrado")
+        end
+        local function same(a,b) return Snake.resolve(a)==Snake.resolve(b) end
+        local function controlFor(part,body)
+            for _,e in ipairs(body.effectors) do if Snake.resolve(e.tip)==part then return e end end
+        end
+        local function source(rig,kind)
+            local tr=findTrack(rig,"Pivot")
+            return {target=Snake.locate(rig),kind=kind,existed=tr~=nil,label=tr and tr.label or (rig.Name.." / Pivot"),keys=tr and clone(tr.keys) or {},base=Snake.pack(rig:GetPivot())}
+        end
+        local function at(src,t) return #src.keys>0 and Snake.evaluate(src.keys,t) or Snake.unpack(src.base) end
+        local function transformRoots(model,delta)
+            for part,cf in pairs(model.bases) do if not model.inbound[part] then model.bases[part]=delta*cf end end
+        end
+        local function massSamples(model,c)
+            local used={};for _,n in ipairs(model.nodes) do used[n.parent]=true;used[n.child]=true end
+            local overrides={}
+            for _,entry in ipairs(c.masses) do local p=Snake.resolve(entry.target);if p then overrides[p]=entry.mass end end
+            local world=BodyMath.worldGetter(model);local samples={}
+            for part in pairs(used) do
+                local mass=overrides[part]
+                if mass==nil then
+                    if part.Name=="HumanoidRootPart" then mass=0 else
+                        local ok,value=pcall(function() return part:GetMass() end)
+                        assert(ok and type(value)=="number" and value>0,"Não foi possível ler GetMass de "..part.Name)
+                        mass=value
+                    end
+                end
+                samples[#samples+1]={mass=mass,position=world(part).Position}
+            end
+            return samples
+        end
+        local function groundAt(point,rig,tolerance)
+            local params=RaycastParams.new();params.FilterType=Enum.RaycastFilterType.Exclude;params.FilterDescendantsInstances={rig,visuals};params.RespectCanCollide=true
+            local hit=Workspace:Raycast(point+Vector3.new(0,.2+tolerance,0),Vector3.new(0,-(.4+2*tolerance),0),params)
+            return hit and hit.Normal.Y>=.965 and math.abs(hit.Position.Y-point.Y)<=tolerance and (hit.Instance==Workspace.Terrain or hit.Instance.Anchored)
+        end
+        function P.assess(model,body,t,c,report)
+            local world=BodyMath.worldGetter(model)
+            local com,total=PhysicsMath.centerOfMass(massSamples(model,c))
+            local points,feet,rejected={},{},{}
+            local heightMin,heightMax=math.huge,-math.huge
+            local gapMax,angleMax=0,0
+            for _,s in ipairs(c.supports) do if s.enabled then
+                local part=Snake.resolve(s.tip);local e=part and controlFor(part,body)
+                local reason,contact
+                if not e or not e.enabled then reason="sem controle ativo" else
+                    for _,ct in ipairs(e.contacts) do if t>=ct.start and t<=ct.finish then contact=ct;break end end
+                    if not contact then reason="sem contato declarado neste tempo" end
+                end
+                if not reason then
+                    local goal,_,weight=BodyMath.control(e,t)
+                    local actual=world(part);local gap=(actual:PointToWorldSpace(vec(e.offset))-vec(contact.point)).Magnitude
+                    local angle=0
+                    if contact.rotation then local _,a=BodyMath.axisAngle((actual-actual.Position):Inverse()*Snake.unpack(contact.rotation));angle=math.deg(math.abs(a)) end
+                    gapMax=math.max(gapMax,gap);angleMax=math.max(angleMax,angle)
+                    if weight<.999 or (goal-vec(contact.point)).Magnitude>.001 then reason="contato em fade / peso parcial"
+                    elseif gap>c.contactTolerance then reason=string.format("contato não alcançado (%.3f)",gap)
+                    elseif actual.UpVector.Y<.965 or angle>5 then reason="pé inclinado / orientação incompatível" end
+                    local corners={}
+                    for _,v in ipairs({{-1,-1},{1,-1},{1,1},{-1,1}}) do
+                        local q=actual:PointToWorldSpace(Vector3.new(v[1]*s.width/2,s.y,v[2]*s.depth/2));corners[#corners+1]=q
+                    end
+                    if not reason and c.groundCheck then
+                        for _,q in ipairs(corners) do if not groundAt(q,rigFor(),c.contactTolerance) then reason="chão plano/fixo não confirmado";break end end
+                    end
+                    if not reason then
+                        for _,q in ipairs(corners) do points[#points+1]=Vector2.new(q.X,q.Z);heightMin=math.min(heightMin,q.Y);heightMax=math.max(heightMax,q.Y) end
+                        feet[#feet+1]=s.name
+                    end
+                end
+                if reason then rejected[#rejected+1]=s.name..": "..reason end
+            end end
+            local hull=PhysicsMath.hull(points);local region=PhysicsMath.inset(hull,c.margin)
+            local reason
+            if #points==0 then reason="Nenhum apoio utilizável"
+            elseif heightMax-heightMin>math.max(.1,c.contactTolerance*2) then reason="Apoios em alturas diferentes; análise só de plano horizontal"
+            elseif #region<3 then reason="Área de apoio insuficiente para a margem" end
+            local nearest,distance
+            if not reason then nearest,distance=PhysicsMath.closest(region,Vector2.new(com.X,com.Z)) end
+            return {valid=reason==nil,reason=reason,com=com,mass=total,hull=hull,region=region,nearest=nearest,distance=distance,feet=feet,rejected=rejected,y=#points>0 and (heightMin+heightMax)/2 or com.Y,contactError=math.max(gapMax,report and report.error or 0),angle=angleMax,report=report,supportKey=table.concat(feet,"|")}
+        end
+        function P.analyze()
+            assert(not A.baking and not playing,"Pause antes de analisar")
+            local c=config();local model,_,report=B.solve(playhead,false,nil,true)
+            P.last=P.assess(model,project.body,playhead,c,report);P.visible=true;P.refresh();P.draw()
+        end
+        function P.restoreRoot()
+            local c=project.assist;if not c then return end
+            if c.rootSource then
+                local s=c.rootSource;local rig=Snake.resolve(s.target)
+                if rig then
+                    local tr=findTrack(rig,"Pivot")
+                    if s.existed then tr=tr or ensureTrack(rig,"Pivot");tr.keys=clone(s.keys);tr.label=s.label
+                    elseif tr then local i=table.find(project.tracks,tr);if i then table.remove(project.tracks,i) end end
+                    Snake.write(rig,"Pivot",Snake.unpack(s.base))
+                end
+            end
+            for _,e in ipairs(project.body and project.body.effectors or {}) do
+                if e.assistOriginalMutes then e.mutes=clone(e.assistOriginalMutes);e.assistOriginalMutes=nil end
+            end
+            c.rootSource=nil;c.inputSource=nil;c.lastReport=nil;c.lastFlightId=nil;P.last=nil
+        end
+        local function recipe(kind)
+            local c=config();local rig=rigFor();assert(same(c.rig,project.body.rig),"Reinicialize Assist para este rig")
+            local original=source(rig,kind)
+            local input=c.inputSource and c.inputSource.kind==kind and clone(c.inputSource) or clone(original)
+            local body=clone(project.body)
+            local f=c.flight
+            local extra={c.first,c.last,c.first+c.fade,c.last-c.fade}
+            for _,k in ipairs(input.keys) do extra[#extra+1]=k.t end
+            local flightId=string.format("%.8f:%.8f",f.start,f.finish)
+            if kind=="flight" then
+                assert(f.from and f.to,"Capture partida e chegada primeiro")
+                assert(f.finish-f.start>=.01,"Voo precisa de pelo menos 0,01 s")
+                for _,t in ipairs({f.start,f.finish,f.start+f.fade,f.finish-f.fade}) do extra[#extra+1]=t end
+                for _,e in ipairs(body.effectors) do
+                    e.assistOriginalMutes=e.assistOriginalMutes or clone(e.mutes or {})
+                    local mutes={}
+                    for _,m in ipairs(e.mutes or {}) do
+                        if not (c.inputSource and c.inputSource.kind=="flight" and m.assistId==c.lastFlightId) then mutes[#mutes+1]=m end
+                    end
+                    if f.release then
+                        assert(#mutes<32,"Até 32 intervalos sem IK por controle")
+                        mutes[#mutes+1]={start=f.start,finish=f.finish,fade=f.fade,assistId=flightId}
+                    end
+                    e.mutes=mutes
+                end
+            end
+            local output={}
+            local summary={kind=kind,before=0,after=0,shift=0,skipped=0,samples=0,groundChecked=c.groundCheck,reasons={}}
+            local r={rig=rig,times=extra}
+            function r.sample(t,sources)
+                local initial,goals,objects=B.model(t,sources,body)
+                local inputRoot=at(input,t);transformRoots(initial,inputRoot*rig:GetPivot():Inverse())
+                local root=inputRoot;local model,report
+                if kind=="flight" then
+                    local velocity
+                    local from,to=Snake.unpack(f.from),Snake.unpack(f.to)
+                    if t>=f.start-1e-8 and t<=f.finish+1e-8 then
+                        root,velocity=PhysicsMath.flightFrame(from,to,f.start,f.finish,t,f.gravity)
+                    elseif t<f.start then root=from*at(input,f.start):Inverse()*inputRoot
+                    else root=to*at(input,f.finish):Inverse()*inputRoot end
+                    transformRoots(initial,root*inputRoot:Inverse())
+                    model=initial;report=BodyMath.solve(model,goals,{iterations=body.iterations,tolerance=.01,step=25})
+                    local k={t=t,value=Snake.pack(root),ease=velocity and t<f.finish-1e-8 and "hermite" or "linear"}
+                    if velocity then k.inTangent=Snake.pack(velocity);k.outTangent=Snake.pack(velocity) end
+                    output[#output+1]=k
+                else
+                    local function evaluate(delta)
+                        local candidate=PhysicsMath.copyModel(initial);PhysicsMath.shiftRoots(candidate,delta)
+                        local result=BodyMath.solve(candidate,goals,{iterations=body.iterations,tolerance=.01,step=25})
+                        local state=P.assess(candidate,body,t,c,result);state.model=candidate
+                        return state
+                    end
+                    local w=PhysicsMath.envelope(t,c.first,c.last,c.fade)
+                    local delta,best,search
+                    if w>0 then
+                        delta,best,search=PhysicsMath.balanceSearch(evaluate,{maxShift=c.maxShift*w,iterations=c.iterations,contactTolerance=c.contactTolerance})
+                        summary.samples=summary.samples+1
+                        if best.valid then
+                            summary.before=math.max(summary.before,search.initial.distance);summary.after=math.max(summary.after,best.distance)
+                            summary.shift=math.max(summary.shift,delta.Magnitude)
+                        else summary.skipped=summary.skipped+1;summary.reasons[best.reason]=true end
+                    else delta=Vector3.zero;best=evaluate(delta) end
+                    model,report=best.model,best.report;root=inputRoot+delta
+                    output[#output+1]={t=t,value=Snake.pack(root),ease="linear"}
+                end
+                return model,objects,report
+            end
+            function r.commit()
+                if kind=="balance" then
+                    for i=1,#output-1 do
+                        local a,b=output[i],output[i+1]
+                        if (Snake.unpack(a.value).Position-at(input,a.t).Position).Magnitude<1e-8 and (Snake.unpack(b.value).Position-at(input,b.t).Position).Magnitude<1e-8 then
+                            local va,ia=PhysicsMath.curveVelocity(input.keys,a.t,false)
+                            local vb,ib=PhysicsMath.curveVelocity(input.keys,b.t,true)
+                            if va and vb and ia==ib then a.ease="hermite";a.outTangent=Snake.pack(va);b.inTangent=Snake.pack(vb) end
+                        end
+                    end
+                end
+                ensureTrack(rig,"Pivot").keys=output
+                c.rootSource=c.rootSource or original;c.inputSource=input;c.lastReport=summary
+                if kind=="flight" then
+                    c.lastFlightId=flightId
+                    for i,e in ipairs(body.effectors) do project.body.effectors[i].mutes=e.mutes;project.body.effectors[i].assistOriginalMutes=e.assistOriginalMutes end
+                end
+                P.last=nil
+            end
+            return r
+        end
+        function P.bake(kind)
+            local c=config()
+            if kind=="balance" then assert(#c.supports>0,"Adicione os pés de apoio") end
+            local ok,err=B.bake(c.rate,recipe(kind));assert(ok,err)
+            P.refresh()
+        end
+        -- UI numérica e tocável; sem dependência de plugins ou manipuladores desktop.
+        local panel=content("Física",2210)
+        label(panel,"MOTION ASSIST • apoio, massa e voo",UDim2.fromOffset(4,0),UDim2.new(1,-8,0,32))
+        label(panel,"Análise estática: COM versus apoios declarados. Não detecta equilíbrio dinâmico. Correção e bake são ações explícitas; salve seu JSON.",UDim2.fromOffset(4,36),UDim2.new(1,-8,0,80),true)
+        button(panel,"Inicializar assistência do Body",UDim2.fromOffset(0,124),UDim2.new(1,0,0,36),safe(function()
+            local rig=rigFor();assert(not project.assist or not project.assist.rootSource,"Restaure a base antes de reinicializar")
+            snapshot()
+            project.assist={rig=Snake.locate(rig),supports={},masses={},margin=.05,contactTolerance=.05,maxShift=.5,iterations=6,first=0,last=project.duration,fade=math.min(.15,project.duration/4),rate=30,groundCheck=false,flight={start=0,finish=math.min(.6,project.duration),gravity=Workspace.Gravity or 196.2,fade=.02,release=true}}
+            local c=project.assist;c.flight.fade=math.min(c.flight.fade,c.flight.finish/4)
+            for _,e in ipairs(project.body.effectors) do
+                local p=Snake.resolve(e.tip)
+                if p and (string.find(string.lower(p.Name),"foot",1,true) or p.Name=="Left Leg" or p.Name=="Right Leg") then
+                    c.supports[#c.supports+1]={name=p.Name,tip=clone(e.tip),enabled=true,width=p.Size.X,depth=p.Size.Z,y=-p.Size.Y/2}
+                end
+            end
+            P.refresh();notify("Pés reconhecidos quando possível. Declare os contatos em Corpo e confira as dimensões da sola.")
+        end),true)
+        local supports=scroll(panel,UDim2.fromOffset(0,171),UDim2.new(1,0,0,112))
+        button(panel,"Adicionar Part selecionada como apoio",UDim2.fromOffset(0,294),UDim2.new(1,0,0,34),safe(function()
+            local c=config();assert(selected and selected:IsA("BasePart"),"Selecione a Part do pé")
+            assert(controlFor(selected,project.body),"O pé precisa de um controle Body")
+            for _,s in ipairs(c.supports) do assert(Snake.resolve(s.tip)~=selected,"Apoio já cadastrado") end
+            assert(#c.supports<8,"Até 8 apoios");snapshot();c.supports[#c.supports+1]={name=selected.Name,tip=Snake.locate(selected),enabled=true,width=selected.Size.X,depth=selected.Size.Z,y=-selected.Size.Y/2};P.selected=#c.supports;P.refresh()
+        end))
+        label(panel,"Sola selecionada: largura X / profundidade Z / Y local",UDim2.fromOffset(4,338),UDim2.new(1,-8,0,43),true)
+        local sole={};for i=1,3 do sole[i]=box(panel,"0",UDim2.new((i-1)/3,0,0,389),UDim2.new(1/3,-4,0,34)) end
+        button(panel,"Salvar sola",UDim2.fromOffset(0,434),UDim2.new(.5,-4,0,32),safe(function()
+            local s=assert(config().supports[P.selected],"Selecione um apoio");local x,z,y=finite(sole[1].Text,.01,100),finite(sole[2].Text,.01,100),finite(sole[3].Text,-100,100)
+            snapshot();s.width=x;s.depth=z;s.y=y;P.refresh()
+        end))
+        button(panel,"Remover apoio",UDim2.new(.5,4,0,434),UDim2.new(.5,-4,0,32),safe(function() local c=config();assert(c.supports[P.selected],"Selecione apoio");snapshot();table.remove(c.supports,P.selected);P.refresh() end))
+        local ground=button(panel,"Confirmar chão por raycast: Off",UDim2.fromOffset(0,477),UDim2.new(1,0,0,32),safe(function() local c=config();snapshot();c.groundCheck=not c.groundCheck;P.refresh() end))
+        label(panel,"Raycast opcional exige chão plano/fixo sob os 4 cantos. Off = apenas contato declarado. Apoios inclinados, distantes ou em fade não contam.",UDim2.fromOffset(4,520),UDim2.new(1,-8,0,74),true)
+        label(panel,"Massa da Part selecionada (0 exclui do COM)",UDim2.fromOffset(4,604),UDim2.new(1,-8,0,30))
+        local mass=box(panel,"1",UDim2.fromOffset(0,644),UDim2.new(.3,-4,0,32))
+        button(panel,"Definir massa",UDim2.new(.3,2,0,644),UDim2.new(.35,-4,0,32),safe(function()
+            local c=config();local rig=rigFor();assert(selected and selected:IsA("BasePart") and selected:IsDescendantOf(rig),"Selecione uma Part do rig")
+            local value=finite(mass.Text,0,1e6);local found
+            for _,m in ipairs(c.masses) do if Snake.resolve(m.target)==selected then found=m end end
+            assert(found or #c.masses<180,"Limite de massas");snapshot()
+            if found then found.mass=value else c.masses[#c.masses+1]={target=Snake.locate(selected),mass=value} end
+            P.refresh();notify("Massa usada apenas pela análise; não altera a física da Part.")
+        end))
+        button(panel,"Automática",UDim2.new(.65,2,0,644),UDim2.new(.35,-2,0,32),safe(function()
+            local c=config();snapshot();for i=#c.masses,1,-1 do if Snake.resolve(c.masses[i].target)==selected then table.remove(c.masses,i) end end;P.refresh()
+        end))
+        label(panel,"Padrão: GetMass das Parts do esqueleto Motor6D, centradas na Part. Exclui HRP e acessórios. É uma aproximação; HRP pode ser incluído manualmente.",UDim2.fromOffset(4,687),UDim2.new(1,-8,0,74),true)
+        label(panel,"CORRIGIR APOIO • início / fim / fade (s)",UDim2.fromOffset(4,773),UDim2.new(1,-8,0,30))
+        local interval={};for i=1,3 do interval[i]=box(panel,"0",UDim2.new((i-1)/3,0,0,813),UDim2.new(1/3,-4,0,34)) end
+        label(panel,"Margem / deslocamento máx. / tolerância (studs)",UDim2.fromOffset(4,858),UDim2.new(1,-8,0,38),true)
+        local balance={};for i=1,3 do balance[i]=box(panel,"0",UDim2.new((i-1)/3,0,0,906),UDim2.new(1/3,-4,0,34)) end
+        label(panel,"Taxa de bake (Hz) / iterações de busca",UDim2.fromOffset(4,951),UDim2.new(1,-8,0,30))
+        local rate=box(panel,"30",UDim2.fromOffset(0,991),UDim2.new(.5,-4,0,34))
+        local iterations=box(panel,"6",UDim2.new(.5,4,0,991),UDim2.new(.5,-4,0,34))
+        local function saveBalance()
+            local c=config();local first,last=finite(interval[1].Text,0,project.duration),finite(interval[2].Text,0,project.duration);assert(last>first,"Fim deve ser maior que início")
+            local fade=finite(interval[3].Text,0,(last-first)/2)
+            local margin,shift,tol=finite(balance[1].Text,0,10),finite(balance[2].Text,0,5),finite(balance[3].Text,.001,1)
+            local hz,it=finite(rate.Text,1,240),math.floor(finite(iterations.Text,1,16))
+            snapshot();c.first=first;c.last=last;c.fade=fade;c.margin=margin;c.maxShift=shift;c.contactTolerance=tol;c.rate=hz;c.iterations=it;P.refresh()
+        end
+        button(panel,"Salvar parâmetros de apoio",UDim2.fromOffset(0,1036),UDim2.new(1,0,0,34),safe(saveBalance))
+        button(panel,"Analisar sem alterar pose",UDim2.fromOffset(0,1081),UDim2.new(1,0,0,34),safe(P.analyze))
+        button(panel,"Corrigir raiz + bake de contatos",UDim2.fromOffset(0,1126),UDim2.new(1,0,0,38),safe(function() saveBalance();P.bake("balance") end),true)
+        label(panel,"Busca horizontal limitada, sem piorar os contatos além da tolerância. Fora do alcance ou sem apoio válido: não corrige. Fade limita a correção perto das bordas; não garante suavidade entre amostras.",UDim2.fromOffset(4,1176),UDim2.new(1,-8,0,95),true)
+        label(panel,"SALTO • decolagem / aterrissagem (s)",UDim2.fromOffset(4,1283),UDim2.new(1,-8,0,30))
+        local start=box(panel,"0",UDim2.fromOffset(0,1323),UDim2.new(.5,-4,0,34))
+        local finish=box(panel,"0.6",UDim2.new(.5,4,0,1323),UDim2.new(.5,-4,0,34))
+        label(panel,"Gravidade (studs/s²) / fade de IK no voo (s)",UDim2.fromOffset(4,1368),UDim2.new(1,-8,0,35),true)
+        local gravity=box(panel,"196.2",UDim2.fromOffset(0,1413),UDim2.new(.5,-4,0,34))
+        local flightFade=box(panel,"0.02",UDim2.new(.5,4,0,1413),UDim2.new(.5,-4,0,34))
+        local release=button(panel,"Liberar controles durante voo: On",UDim2.fromOffset(0,1458),UDim2.new(1,0,0,32),safe(function() local f=config().flight;snapshot();f.release=not f.release;P.refresh() end))
+        local function saveFlight()
+            local f=config().flight;local a,b=finite(start.Text,0,project.duration),finite(finish.Text,0,project.duration);assert(b-a>=.01,"Voo mínimo de 0,01 s")
+            local g,fade=finite(gravity.Text,0,1000),finite(flightFade.Text,0,(b-a)/2)
+            local hz=finite(rate.Text,1,240)
+            snapshot();f.start=a;f.finish=b;f.gravity=g;f.fade=fade;config().rate=hz;P.refresh()
+        end
+        button(panel,"Salvar tempos / gravidade",UDim2.fromOffset(0,1501),UDim2.new(1,0,0,34),safe(saveFlight))
+        button(panel,"Capturar partida",UDim2.fromOffset(0,1546),UDim2.new(.5,-4,0,34),safe(function() local f=config().flight;snapshot();f.from=Snake.pack(rigFor():GetPivot());P.refresh() end))
+        button(panel,"Capturar chegada",UDim2.new(.5,4,0,1546),UDim2.new(.5,-4,0,34),safe(function() local f=config().flight;snapshot();f.to=Snake.pack(rigFor():GetPivot());P.refresh() end))
+        button(panel,"Visualizar arco sem gravar",UDim2.fromOffset(0,1591),UDim2.new(1,0,0,34),safe(function() config();P.visible=true;P.draw(true) end))
+        button(panel,"Gravar salto + Body bake",UDim2.fromOffset(0,1636),UDim2.new(1,0,0,38),safe(function() saveFlight();P.bake("flight") end),true)
+        label(panel,"Posicione o rig e capture cada ponta. Caminho balístico da raiz, com tangentes Hermite; não calcula impulso, colisões ou aterrissagem. Ajuste antecipação, pose no ar e recuperação manualmente. Mãos também são liberadas se On.",UDim2.fromOffset(4,1686),UDim2.new(1,-8,0,110),true)
+        button(panel,"Restaurar raiz e FK anteriores",UDim2.fromOffset(0,1808),UDim2.new(1,0,0,34),safe(function() B.restoreBake();P.refresh() end))
+        button(panel,"Ocultar guias de física",UDim2.fromOffset(0,1853),UDim2.new(1,0,0,32),function() P.visible=false;P.draw() end)
+        local diagnostic=label(panel,"Inicialize para começar.",UDim2.fromOffset(4,1897),UDim2.new(1,-8,0,205),true)
+        label(panel,"Repetir a última operação recalcula sua entrada guardada; alternar salto/apoio compõe sobre a raiz atual. Restaurar devolve a raiz anterior à primeira assistência. Undo/JSON incluem os parâmetros e backups.",UDim2.fromOffset(4,2111),UDim2.new(1,-8,0,95),true)
+        local folder=make("Folder",visuals,{Name="PhysicsAssist"})
+        function P.draw(flight)
+            for _,o in ipairs(folder:GetChildren()) do o:Destroy() end
+            if not P.visible then return end
+            if flight then
+                local f=config().flight;assert(f.from and f.to,"Capture partida e chegada")
+                local a,b=Snake.unpack(f.from),Snake.unpack(f.to)
+                for i=0,40 do
+                    local cf=PhysicsMath.flightFrame(a,b,f.start,f.finish,f.start+(f.finish-f.start)*i/40,f.gravity)
+                    local dot=worldPart(folder,"FlightPath",cf.Position,Vector3.new(.1,.1,.1),C.accent,.15);dot.Shape=Enum.PartType.Ball
+                end
+            elseif P.last then
+                local s=P.last;local color=s.valid and s.distance<=.005 and C.accent or C.warn
+                local dot=worldPart(folder,"CenterOfMass",s.com,Vector3.new(.22,.22,.22),color,.1);dot.Shape=Enum.PartType.Ball
+                local projected=worldPart(folder,"COMProjection",Vector3.new(s.com.X,s.y+.025,s.com.Z),Vector3.new(.18,.05,.18),color,.1)
+                for i,a in ipairs(s.region) do
+                    local b=s.region[i%#s.region+1]
+                    local p,q=Vector3.new(a.X,s.y+.03,a.Y),Vector3.new(b.X,s.y+.03,b.Y)
+                    if (p-q).Magnitude>1e-6 then
+                        local edge=worldPart(folder,"SupportEdge",(p+q)/2,Vector3.new(.025,.025,(p-q).Magnitude),color,.1);edge.CFrame=CFrame.lookAt((p+q)/2,q)
+                    end
+                end
+            end
+        end
+        function P.refresh()
+            local c=project.assist
+            for _,o in ipairs(supports:GetChildren()) do o:Destroy() end
+            if not c then diagnostic.Text="Inicialize para começar.";P.last=nil;P.visible=false;P.draw();return end
+            P.selected=math.clamp(P.selected,1,math.max(1,#c.supports))
+            for i,s in ipairs(c.supports) do button(supports,s.name,UDim2.fromOffset(2,(i-1)*35),UDim2.new(1,-8,0,31),function() P.selected=i;P.refresh() end,i==P.selected) end
+            local s=c.supports[P.selected]
+            if s then sole[1].Text=tostring(s.width);sole[2].Text=tostring(s.depth);sole[3].Text=tostring(s.y) end
+            interval[1].Text=tostring(c.first);interval[2].Text=tostring(c.last);interval[3].Text=tostring(c.fade)
+            balance[1].Text=tostring(c.margin);balance[2].Text=tostring(c.maxShift);balance[3].Text=tostring(c.contactTolerance)
+            rate.Text=tostring(c.rate);iterations.Text=tostring(c.iterations)
+            ground.Text="Confirmar chão por raycast: "..(c.groundCheck and "On" or "Off")
+            local f=c.flight;start.Text=tostring(f.start);finish.Text=tostring(f.finish);gravity.Text=tostring(f.gravity);flightFade.Text=tostring(f.fade)
+            release.Text="Liberar controles durante voo: "..(f.release and "On" or "Off")
+            local lines={#c.supports.." apoios • "..#c.masses.." massas personalizadas",(f.from and "Partida ✓" or "Partida pendente").." / "..(f.to and "Chegada ✓" or "Chegada pendente")}
+            if c.lastReport then
+                local r=c.lastReport
+                lines[#lines+1]="Último bake: "..r.kind.." (refaça após editar)"
+                if r.kind=="balance" then
+                    lines[#lines+1]=string.format("Distância máx ao apoio: %.3f → %.3f studs",r.before,r.after)
+                    lines[#lines+1]=string.format("Correção máx %.3f • %d/%d amostras sem apoio",r.shift,r.skipped,r.samples)
+                    for reason in pairs(r.reasons or {}) do lines[#lines+1]=reason end
+                end
+            end
+            if P.last then
+                local a=P.last
+                lines[#lines+1]=a.valid and string.format("Análise atual: %.4f studs fora da margem",a.distance) or (a.reason or "Inválido")
+                lines[#lines+1]=string.format("Massa %.2f • erro de contato %.4f",a.mass,a.contactError)
+                for _,reason in ipairs(a.rejected) do lines[#lines+1]=reason end
+            end
+            diagnostic.Text=table.concat(lines,"\n")
+        end
+        function P.invalidate() local had=P.last~=nil;P.last=nil;P.visible=false;P.draw();if had then P.refresh() end end
+        function P.retime(ratio)
+            local c=project.assist;if not c then return end
+            c.first=c.first*ratio;c.last=c.last*ratio;c.fade=c.fade*ratio
+            local f=c.flight;f.start=f.start*ratio;f.finish=f.finish*ratio;f.fade=f.fade*ratio;f.gravity=f.gravity/(ratio*ratio)
+            for _,field in ipairs({"rootSource","inputSource"}) do
+                local src=c[field]
+                if src then for _,k in ipairs(src.keys) do
+                    k.t=k.t*ratio
+                    for _,name in ipairs({"inTangent","outTangent"}) do if k[name] then k[name]=Snake.pack(Snake.unpack(k[name])/ratio) end end
+                end end
+            end
+            P.refresh()
+        end
+        P.refresh()
+    end
+
+    advancedHooks.edited=function() if A.physics then A.physics.invalidate() end end
     advancedHooks.previewStopped=function(restore)
         if restore then A.pin=false;A.refreshIK();if A.body then A.body.live=false;A.body.refresh() end end
     end
     advancedHooks.tracksChanged=function()
-        A.dirtyGraph=true;A.ghostDirty=true
+        A.dirtyGraph=true;A.ghostDirty=true;if A.physics then A.physics.invalidate() end
     end
     advancedHooks.timeChanged=function(updateFields)
+        if A.physics then A.physics.invalidate() end
         if A.pin and project.ik and not A.baking then
             local ok,err=pcall(A.solveIK,false)
             if not ok then A.pin=false;A.refreshIK();notify(tostring(err),true) end
@@ -3210,6 +3913,7 @@ local function installAdvancedTools()
     advancedHooks.projectChanged=function()
         A.pin=false;A.graphRange=nil;A.dirtyGraph=true;A.posesIndex=1
         A.clearMotionViews();A.refreshIK();A.refreshPoses()
+        if A.physics then A.physics.invalidate();A.physics.refresh() end
         if A.body then A.body.live=false;A.body.gizmo="off";A.body.result=nil;A.body.refresh() end
     end
     advancedHooks.cleanup=function()
@@ -3245,10 +3949,12 @@ local function installAdvancedTools()
         end
     end)
     advancedHooks.retime=function(ratio)
+        if A.physics then A.physics.retime(ratio) end
         local body=project.body;if not body then return end
         for _,e in ipairs(body.effectors) do
             for _,channel in ipairs({"keys","poles","rotations","weights"}) do for _,k in ipairs(e[channel]) do k.t=k.t*ratio end end
             for _,c in ipairs(e.contacts) do c.start=c.start*ratio;c.finish=c.finish*ratio;c.fade=c.fade*ratio end
+            for _,channel in ipairs({"mutes","assistOriginalMutes"}) do for _,m in ipairs(e[channel] or {}) do m.start=m.start*ratio;m.finish=m.finish*ratio;m.fade=m.fade*ratio end end
         end
         for _,src in ipairs(body.sources or {}) do for _,k in ipairs(src.keys) do k.t=k.t*ratio end end
     end
