@@ -9,8 +9,8 @@
    3) Toque no 🏛 (arraste-o pra um canto vazio) e ative a IA
       UMA VEZ SÓ: botão ⚙ no título do painel
         • conta grátis: https://puter.com
-        • token: https://puter.com/dashboard > "Create token"
-        • cole o token em "token" e toque em "Ativar IA ✅"
+        • token Puter: https://puter.com/dashboard > "Create token"
+        • cole o token e toque em "Ativar IA ✅"
       Depois é só pedir: favela, capivara, armadura medieval,
       cabana, castelo... o modelo aparece NA FRENTE do avatar.
 
@@ -1596,10 +1596,10 @@ local BUDGET = 3000  -- limite de parts por modelo
 -- IA DIRETO NO SCRIPT (OpenAI-compatible: Puter, OpenRouter, Groq...)
 -- ============================================================
 local AI_STATE_NAME = "Roblox3D_AI_State"
--- PADRAO = ponte local. A conta Puter FREE bloqueia IA por token (HTTP 402),
--- entao o caminho que funciona e o server local + aba /puter (puter.js).
+-- PADRAO = PUTER: catalogo VIVO (1000+ modelos), nada de lista fixa.
+-- O ranqueador abaixo le a lista real e escolhe IAs DIFERENTES por etapa.
 local AI_DEFAULTS = {
-    base = "http://127.0.0.1:8787",
+    base = "https://api.puter.com/puterai/openai/v1",
     key = "",
     model = "auto",
 }
@@ -1696,12 +1696,21 @@ end
 -- Detecta automaticamente se a URL e uma PONTE local (server Roblox3D).
 -- Na ponte o endpoint e /v2/llm e NAO precisa de token: quem fala com a IA
 -- e a aba do navegador (puter.js), que nao cai no 402 de subscription.
+-- provedores OpenAI-compatible conhecidos (NAO sao ponte)
+local DIRECT_APIS = {
+    "api.puter.com", "/puterai", "api.openai.com", "api.groq.com",
+    "openrouter.ai", "generativelanguage.googleapis.com", "api.anthropic.com",
+    "api.mistral.ai", "api.deepseek.com", "api.together.xyz", "/v1",
+}
 local function isBridge(base)
     local b = tostring(base or ""):lower()
-    if b:find("/puterai", 1, true) then return false end
-    if b:find("api.puter.com", 1, true) then return false end
-    return b:find("127%.0%.0%.1") or b:find("localhost") or b:find("^https?://%d+%.%d+%.%d+%.%d+")
-        or b:find("%.e2b%.app") or b:find("/v2$") or b:find("ngrok")
+    if b == "" then return true end
+    for _, d in ipairs(DIRECT_APIS) do
+        if b:find(d, 1, true) then return false end
+    end
+    -- qualquer outra coisa tratamos como PONTE (server Roblox3D):
+    -- tuneis (trycloudflare, ngrok, loca.lt, serveo...), IP local, localhost
+    return true
 end
 
 local function callBridge(cfg, systemPrompt, userPrompt, maxTokens)
@@ -1735,7 +1744,51 @@ local function callBridge(cfg, systemPrompt, userPrompt, maxTokens)
     return data.text
 end
 
-local function callLLM(cfg, systemPrompt, userPrompt, maxTokens)
+-- tenta a fila de modelos: se um falhar (429/limite/indisponivel), vai pro proximo
+local bannedModel = {}
+local callLLMOne  -- declarado antes (definido logo abaixo)
+local rankFor     -- ranqueador do catalogo vivo (definido mais abaixo)
+local function callLLMAuto(cfg, systemPrompt, userPrompt, maxTokens, stage)
+    stage = stage or "other"
+    local fila = {}
+    local m0 = cfg.model or ""
+    if m0 ~= "" and m0 ~= "auto" then
+        fila = {m0}                      -- usuario fixou um modelo: respeita
+    else
+        local ranked = rankFor(cfg, stage)   -- catalogo VIVO, ordenado pra etapa
+        if ranked then
+            for k = 1, math.min(#ranked, 8) do fila[#fila + 1] = ranked[k] end
+        end
+        if #fila == 0 then fila = {"gpt-4o-mini"} end  -- rede caiu: ultimo recurso
+    end
+    local lastErr
+    for _, m in ipairs(fila) do
+        if not bannedModel[m] then
+            local c2 = {base = cfg.base, key = cfg.key, model = m}
+            local txt, err = callLLMOne(c2, systemPrompt, userPrompt, maxTokens)
+            if txt then
+                if _G.R3D_LAST_MODEL ~= m then _G.R3D_LAST_MODEL = m end
+                return txt
+            end
+            lastErr = err
+            local e = tostring(err):lower()
+            -- 429 = limite por minuto: espera e tenta o MESMO de novo
+            if e:find("429") or e:find("rate") then
+                task.wait(3)
+                local t2, e2 = callLLMOne(c2, systemPrompt, userPrompt, maxTokens)
+                if t2 then _G.R3D_LAST_MODEL = m return t2 end
+                lastErr = e2 or err
+            end
+            if e:find("decommission") or e:find("not found") or e:find("does not exist")
+                or e:find("404") or e:find("model_not_found") then
+                bannedModel[m] = true
+            end
+        end
+    end
+    return nil, lastErr or "nenhum modelo respondeu"
+end
+
+function callLLMOne(cfg, systemPrompt, userPrompt, maxTokens)
     if isBridge(cfg.base) then
         return callBridge(cfg, systemPrompt, userPrompt, maxTokens)
     end
@@ -1765,6 +1818,13 @@ local function callLLM(cfg, systemPrompt, userPrompt, maxTokens)
         local okd, dd = pcall(function() return HttpService:JSONDecode(resp.Body) end)
         if okd and type(dd) == "table" and dd.error then
             detail = tostring(dd.error.message or dd.error)
+        end
+        if resp.StatusCode == 401 or resp.StatusCode == 403 then
+            return nil, "HTTP " .. tostring(resp.StatusCode) .. " — chave invalida ou expirada. " ..
+                "Pegue o seu token em puter.com/dashboard e cole no campo do menu ⚙."
+        end
+        if resp.StatusCode == 429 then
+            return nil, "429 rate limit — muitos pedidos por minuto. Espere ~30s e tente de novo (o limite gratis e 30/min)."
         end
         if resp.StatusCode == 402 then
             return nil, "HTTP 402 — a conta Puter FREE nao libera IA por token. " ..
@@ -1855,6 +1915,78 @@ local function findBridge(preferred)
         if b then return b, lig end
     end
     return nil
+end
+
+
+-- ============================================================
+-- RANQUEADOR DINAMICO: le o catalogo VIVO e escolhe por ETAPA.
+-- Nenhuma lista fixa de modelos. Mesma logica validada no server.
+-- ============================================================
+local TIER = {
+    {"fable", 100}, {"opus", 95}, {"ultra", 88}, {"sonnet", 80}, {"gpt%-?5", 78},
+    {"max", 72}, {"pro", 66}, {"405b", 62}, {"70b", 55}, {"thinking", 58},
+    {"reasoning", 58}, {"flash", 40}, {"mini", 30}, {"haiku", 30},
+    {"lite", 22}, {"nano", 16}, {"small", 12}, {"tiny", 12}, {"fast", 20},
+}
+local FAM = {
+    {"claude", 30}, {"gpt%-?5", 26}, {"gemini", 22}, {"grok", 20},
+    {"deepseek", 18}, {"qwen", 14}, {"llama", 10}, {"mistral", 10},
+}
+local function verBonus(id)
+    local best = 0
+    for num in id:gmatch("%d+%.?%d*") do
+        local v = tonumber(num) or 0
+        if v > best and v < 100 then best = v end
+    end
+    return math.min(best * 3, 30)
+end
+local function scoreModel(id)
+    local low, sc = id:lower(), 0
+    for _, t in ipairs(TIER) do if low:find(t[1]) then sc = sc + t[2] end end
+    for _, f in ipairs(FAM)  do if low:find(f[1]) then sc = sc + f[2] end end
+    sc = sc + verBonus(low)
+    if low:find(":free") then sc = sc + 45 end
+    if low:find("preview") or low:find("experimental") or low:find("alpha") or low:find("beta") then sc = sc - 12 end
+    if low:find(":batch") then sc = sc - 150 end
+    for _, bad in ipairs({"vision", "image", "audio", "tts", "whisper", "embed",
+                          "omni", "translat", "coder", "math", "guard", "moderat"}) do
+        if low:find(bad) then sc = sc - 70 end
+    end
+    if low:find("^openrouter:") then sc = sc + 6 end
+    return sc
+end
+-- cada ETAPA pede um perfil diferente de IA
+local STAGE_W = {
+    plan    = {think = 1.35, big = 1.30, fast = 0.80},
+    section = {think = 1.10, big = 1.20, fast = 0.95},
+    decor   = {think = 0.95, big = 0.95, fast = 1.20},
+    other   = {think = 1.00, big = 1.00, fast = 1.00},
+}
+local function scoreFor(id, stage)
+    local w = STAGE_W[stage] or STAGE_W.other
+    local low, sc = id:lower(), scoreModel(id)
+    if low:find("thinking") or low:find("reasoning") or low:find("opus") or low:find("fable") then sc = sc * w.think end
+    if low:find("fable") or low:find("opus") or low:find("ultra") or low:find("max")
+        or low:find("pro") or low:find("sonnet") or low:find("405b") or low:find("70b") then sc = sc * w.big end
+    if low:find("flash") or low:find("mini") or low:find("nano") or low:find("lite")
+        or low:find("fast") or low:find("haiku") then sc = sc * w.fast end
+    return sc
+end
+-- devolve a fila de modelos do catalogo vivo, ordenada para a etapa
+local rankCache = {}
+function rankFor(cfg, stage)
+    if rankCache[stage] then return rankCache[stage] end
+    local list = fetchModels(cfg)
+    if type(list) ~= "table" or #list == 0 then return nil end
+    local arr = {}
+    for _, id in ipairs(list) do arr[#arr + 1] = id end
+    table.sort(arr, function(a, b) return scoreFor(a, stage) > scoreFor(b, stage) end)
+    rankCache[stage] = arr
+    return arr
+end
+
+local function callLLM(cfg, systemPrompt, userPrompt, maxTokens, stage)
+    return callLLMAuto(cfg, systemPrompt, userPrompt, maxTokens, stage)
 end
 
 local function validateLLM(cfg)
@@ -1979,10 +2111,14 @@ local TEX_DEFS = {
     marmore      = {style = "marble", base = {238, 235, 228},  s = 50},
     tijolo       = {style = "brick",  base = {152, 96, 76},    s = 40},
     terra        = {style = "earth",  base = {140, 100, 62},   s = 12},
+    palha        = {style = "thatch", base = {196, 168, 96},   s = 33},
     metal        = {style = "metal",  base = {148, 154, 162},  s = 70},
     metal_escuro = {style = "metal",  base = {92, 95, 102},    s = 100},
+    dourado      = {style = "metal",  base = {204, 164, 66},   s = 80},
+    prata        = {style = "metal",  base = {196, 200, 206},  s = 90},
     couro        = {style = "leather", base = {120, 80, 50},   s = 170},
     lona         = {style = "fabric", base = {176, 168, 140},  s = 160},
+    folha        = {style = "grass",  base = {70, 100, 48},    s = 140},
     grama        = {style = "grass",  base = {102, 132, 62},   s = 120},
     areia        = {style = "sand",   base = {198, 180, 142},  s = 130},
     agua         = {style = "water",  base = {54, 116, 158},   s = 150},
@@ -1995,9 +2131,10 @@ local TEX_STYLE_KEY = {
 
 local MAT_PURE = {vidro = "Glass", neon = "Neon", plastico = "SmoothPlastic"}
 local MAT_FALLBACK = {
-    tijolo = "Brick",
-    marmore = "Marble", basalto = "Basalt", metal = "Metal", metal_escuro = "CorrodedMetal", madeira = "Wood",
-    grama = "Grass", areia = "Sand", lona = "Fabric",
+    pedra = "Granite", terra = "Granite", palha = "Brick", tijolo = "Brick",
+    marmore = "Marble", basalto = "Basalt", metal = "Metal", dourado = "Gold",
+    prata = "Silver", metal_escuro = "CorrodedMetal", madeira = "Wood",
+    grama = "Grass", areia = "Sand", folha = "Foliage", lona = "Fabric",
     couro = "Leather", agua = "SmoothPlastic", gelo = "Ice",
 }
 
@@ -2104,12 +2241,14 @@ local building = false
 
 local MAT_TO_TEX = {
     [Enum.Material.Wood] = "madeira",
+    [Enum.Material.Slate] = "pedra", [Enum.Material.Granite] = "pedra",
     [Enum.Material.Concrete] = "pedra", [Enum.Material.Basalt] = "basalto",
     [Enum.Material.Brick] = "tijolo",
     [Enum.Material.Marble] = "marmore",
     [Enum.Material.Metal] = "metal", [Enum.Material.CorrodedMetal] = "metal_escuro",
+    [Enum.Material.Gold] = "dourado", [Enum.Material.Silver] = "prata",
     [Enum.Material.Grass] = "grama", [Enum.Material.Sand] = "areia",
-    [Enum.Material.Fabric] = "lona",
+    [Enum.Material.Foliage] = "folha", [Enum.Material.Fabric] = "lona",
     [Enum.Material.Leather] = "couro", [Enum.Material.Ice] = "gelo",
     [Enum.Material.Water] = "agua",
 }
@@ -2319,9 +2458,9 @@ local function setupGui(player)
     end
 
     setupLabel("🔑 Ativar a IA (uma vez só)", 6, 18, 13, Color3.fromRGB(240, 243, 250))
-    setupLabel("MODO PONTE (recomendado): deixe o token VAZIO,\nrode o server e toque em Ativar — eu acho sozinho.\nA conta Puter free bloqueia token direto (erro 402).", 27, 38, 11, Color3.fromRGB(160, 168, 185))
-    local keyField = setupField("token — DEIXE VAZIO para usar a ponte", 69, aiCfg.key)
-    local modelField = setupField("modelo — digite pra filtrar (ex.: claude, gpt, grok)", 99, aiCfg.model)
+    setupLabel("Cada um usa a PROPRIA conta Puter:\n1) abra puter.com/dashboard e crie um token\n2) cole o token abaixo — modelo deixa em auto", 27, 38, 11, Color3.fromRGB(160, 168, 185))
+    local keyField = setupField("cole aqui seu token do Puter", 69, aiCfg.key)
+    local modelField = setupField("modelo — deixe auto (escolho por etapa)", 99, aiCfg.model)
     local pickBtn = Instance.new("TextButton")
     pickBtn.Size = UDim2.new(1, -20, 0, 24)
     pickBtn.Position = UDim2.new(0, 10, 0, 129)
@@ -2333,7 +2472,7 @@ local function setupGui(player)
     makeCorner(pickBtn, 7)
     pickBtn.Parent = setupBox
 
-    local baseField = setupField("URL do server/ponte (ex.: http://127.0.0.1:8787)", 159, aiCfg.base)
+    local baseField = setupField("API (padrao Puter; ou URL do seu server/ponte)", 159, aiCfg.base)
     local connectBtn = Instance.new("TextButton")
     connectBtn.Size = UDim2.new(1, -20, 0, 28)
     connectBtn.Position = UDim2.new(0, 10, 0, 193)
@@ -2609,7 +2748,7 @@ local function setupGui(player)
             return
         end
         if p:find("ajuda") or p == "help" then
-            addMsg("Peça qualquer coisa: favela, capivara, armadura medieval, cabana, castelo, carro, espada, cidade…\nDicas:\n• seja específico (\"ultra detalhado\", \"tudo entrável e mobiliado\")\n• trabalho em 3 etapas: plano → seções → decor (pode levar 1-3 min; o status mostra onde estou)\n• limite: 3000 parts por modelo\n• o modelo aparece NA FRENTE do seu avatar\n• botão Limpar apaga tudo\n• ⚙ (no título) troca token/modelo\n• 1000+ modelos do Puter no botão 📋 do ⚙ (bons: anthropic:anthropic/claude-sonnet-5, anthropic:anthropic/claude-opus-4-5, google:google/gemini-3.1-flash-lite)", Color3.fromRGB(180, 188, 205))
+            addMsg("Peça qualquer coisa: favela, capivara, armadura medieval, cabana, castelo, carro, espada, cidade…\nDicas:\n• seja específico (\"ultra detalhado\", \"tudo entrável e mobiliado\")\n• trabalho em 3 etapas: plano → seções → decor (pode levar 1-3 min; o status mostra onde estou)\n• limite: 3000 parts por modelo\n• o modelo aparece NA FRENTE do seu avatar\n• botão Limpar apaga tudo\n• ⚙ (no título) troca token/modelo\n• cada um usa o PROPRIO token Puter (puter.com/dashboard)\n• modelo 'auto': leio os 1000+ modelos do Puter e uso IAs DIFERENTES em cada etapa", Color3.fromRGB(180, 188, 205))
             return
         end
 
@@ -2633,7 +2772,7 @@ local function setupGui(player)
                 :format(CAPS.union and "ON" or "OFF", CAPS.emesh and "ON" or "OFF (curvas viram anéis de caixas orientadas)")
 
             -- ETAPA 1: PLANO (arquiteto divide o trabalho em seções + orçamento)
-            local okP, planRaw = callLLM(aiCfg, SYSTEM_PROMPT, R3D2.promptsPlan(text, BUDGET), 8192)
+            local okP, planRaw = callLLM(aiCfg, SYSTEM_PROMPT, R3D2.promptsPlan(text, BUDGET), 8192, "plan")
             if not okP then fail(planRaw) return end
             local okPJ, plan = pcall(extractJson, planRaw)
             if not okPJ or type(plan) ~= "table" then
@@ -2650,7 +2789,7 @@ local function setupGui(player)
                 local secBudget = math.floor(tonumber(sec.orc) or (BUDGET / #secs))
                 setStatus(string.format("seção %d/%d: %s", i, #secs, tostring(sec.t or "?"):sub(1, 36)), Y)
                 local okS, sRaw = callLLM(aiCfg, SYSTEM_PROMPT,
-                    R3D2.promptsSection(plan, i, sec, secBudget, builtSummary, capInfo), 8192)
+                    R3D2.promptsSection(plan, i, sec, secBudget, builtSummary, capInfo), 8192, "section")
                 if not okS then fail(sRaw) return end
                 local okSJ, sData = pcall(extractJson, sRaw)
                 if okSJ and type(sData) == "table" and type(sData.ops) == "table" then
@@ -2664,7 +2803,7 @@ local function setupGui(player)
             -- ETAPA 3: DECOR + MOOD (luzes, partículas, neon, letreiros, atmosfera)
             setStatus("decor e atmosfera…", Y)
             local mood = nil
-            local okD, dRaw = callLLM(aiCfg, SYSTEM_PROMPT, R3D2.promptsDecor(plan, builtSummary), 8192)
+            local okD, dRaw = callLLM(aiCfg, SYSTEM_PROMPT, R3D2.promptsDecor(plan, builtSummary), 8192, "decor")
             if okD then
                 local okDJ, dData = pcall(extractJson, dRaw)
                 if okDJ and type(dData) == "table" then
@@ -2764,7 +2903,7 @@ local function setupGui(player)
             return
         end
         if key == "" then
-            setupErr.Text = "cole o token, ou deixe vazio p/ usar a ponte local"
+            setupErr.Text = "cole seu token do Puter (puter.com/dashboard)"
             return
         end
         local cfg = {
