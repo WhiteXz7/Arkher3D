@@ -6,7 +6,7 @@
    1) Cole ESTE ARQUIRO INTEIRO num LocalScript:
       aba Scripting/Scripts > "+" > LocalScript > colar > salvar
    2) DÊ PLAY uma vez e volte pro modo edit
-   3) Toque no 🏛 (arraste-o pra um canto vazio) e ative a IA
+   3) Toque no - (arraste-o pra um canto vazio) e ative a IA
       UMA VEZ SÓ: botão ⚙ no título do painel
         • conta grátis: https://puter.com
         • token: https://puter.com/dashboard > "Create token"
@@ -28,6 +28,1569 @@
 local HttpService = game:GetService("HttpService")
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
+
+-- ============================================================
+-- MOTOR R3D2 (curvas perfeitas, fusão booleana real, EditableMesh)
+-- embutido aqui dentro — zero dependências, zero PC.
+-- Camadas: 1) ops paramétricas (a IA desenha, o código calcula)
+--          2) fusão UnionAsync (pieces do MESMO grupo viram 1 mesh)
+--          3) triângulos reais via EditableMesh (se o app permitir;
+--             detectado em runtime por R3D2.probe())
+-- ============================================================
+local R3D2 = (function()
+-- ============================================================
+-- R3D2 — motor de modelagem v2 (fontes única; embutida nos 2 clients)
+--   Camada 1: ops paramétricas (curvas/domes/cupolas/lathe/sweep)
+--             → código faz a matemática, a IA só desenha
+--   Camada 2: fusão booleana REAL via GeometryService
+--             (UnionAsync/SubtractAsync — meshes de verdade)
+--   Camada 3: triângulos custom via EditableMesh (opcional;
+--             exige toggle "Enable Mesh / Image APIs" no
+--             Creator Dashboard — detectado em runtime)
+-- Math é puro (testável fora do Roblox); build é só Roblox.
+-- ============================================================
+local R3D2 = {}
+R3D2.VERSION = "2.0"
+
+-- ---------------- math pura ----------------
+local function v3(x, y, z) return { x = x or 0, y = y or 0, z = z or 0 } end
+function R3D2.v3(a, b, c)
+  if type(a) == "table" then return v3(a[1] or a.x, a[2] or a.y, a[3] or a.z) end
+  return v3(a, b, c)
+end
+local function vadd(a, b) return v3(a.x + b.x, a.y + b.y, a.z + b.z) end
+local function vsub(a, b) return v3(a.x - b.x, a.y - b.y, a.z - b.z) end
+local function vscale(a, s) return v3(a.x * s, a.y * s, a.z * s) end
+local function vdot(a, b) return a.x * b.x + a.y * b.y + a.z * b.z end
+local function vcross(a, b)
+  return v3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x)
+end
+local function vlen(a) return math.sqrt(vdot(a, a)) end
+local function vnorm(a)
+  local l = vlen(a)
+  if l < 1e-9 then return v3(0, 1, 0) end
+  return vscale(a, 1 / l)
+end
+local function vlerp(a, b, t) return v3(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t) end
+local function clamp(v, lo, hi) return math.min(math.max(v, lo), hi) end
+R3D2._m = { v3 = v3, add = vadd, sub = vsub, scale = vscale, dot = vdot, cross = vcross,
+            len = vlen, norm = vnorm, lerp = vlerp, clamp = clamp }
+
+-- Catmull-Rom uniforme — amostra curva suave através de pts
+function R3D2.catmullRom(pts, segPerSeg)
+  local out = {}
+  local n = #pts
+  if n < 2 then return out end
+  local s = math.max(1, math.floor(segPerSeg or 8))
+  local function cr(p0, p1, p2, p3, t)
+    local t2, t3 = t * t, t * t * t
+    return v3(
+      0.5 * ((2 * p1.x) + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+      0.5 * ((2 * p1.y) + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3),
+      0.5 * ((2 * p1.z) + (-p0.z + p2.z) * t + (2 * p0.z - 5 * p1.z + 4 * p2.z - p3.z) * t2 + (-p0.z + 3 * p1.z - 3 * p2.z + p3.z) * t3))
+  end
+  for i = 1, n - 1 do
+    local p0 = pts[i > 1 and i - 1 or 1]
+    local p1 = pts[i]
+    local p2 = pts[i + 1]
+    local p3 = pts[math.min(n, i + 2)]
+    for k = 0, s - 1 do
+      out[#out + 1] = cr(p0, p1, p2, p3, k / s)
+    end
+  end
+  out[#out + 1] = pts[n]
+  return out
+end
+
+-- Arco: pontos ao longo de um círculo (ângulos em graus)
+-- devolve {x,y,z,ang} onde ang = direção tangencial (rad)
+function R3D2.arcPts(cx, cz, r, y, a0, a1, segs)
+  local out = {}
+  local s = math.max(2, math.floor(segs or 24))
+  for i = 0, s do
+    local t = (a0 + (a1 - a0) * i / s) * math.pi / 180
+    out[#out + 1] = { x = cx + r * math.cos(t), y = y, z = cz + r * math.sin(t), ang = t }
+  end
+  return out
+end
+
+-- Esfera/cúpola lat-long → triângulos (winding pra fora)
+-- rings: de +Y (topo) até -Y (se hemi, só até o equador)
+function R3D2.sphereTris(cx, cy, cz, r, u, v, hemi)
+  u = math.max(3, math.floor(u or 16))
+  v = math.max(2, math.floor(v or (hemi and 8 or 12)))
+  local verts, tris = {}, {}
+  local rings = v + 1
+  for ri = 0, rings - 1 do
+    local phi
+    if hemi then
+      phi = (ri / v) * (math.pi / 2)          -- 0 = polo norte, 90° = equador
+    else
+      phi = (ri / v) * math.pi                -- 0 = norte, 180° = sul
+    end
+    local ringY = cy + r * math.cos(phi)
+    local ringR = r * math.sin(phi)
+    for ci = 0, u - 1 do
+      local theta = (ci / u) * 2 * math.pi
+      verts[#verts + 1] = { x = cx + ringR * math.cos(theta), y = ringY, z = cz + ringR * math.sin(theta) }
+    end
+  end
+  local function id(ri, ci) return (ri * u + (ci % u)) + 1 end
+  for ri = 0, v - 1 do
+    local topFlat = (ri == 0)
+    local botFlat = (ri == v - 1) and (not hemi)
+    if topFlat then
+      -- fan no polo norte (vértice 1..u da ring 0 todos iguais → usar id(0,0))
+      for ci = 0, u - 2 do
+        tris[#tris + 1] = { id(0, 0), id(1, ci + 1), id(1, ci) }
+      end
+    elseif botFlat then
+      for ci = 0, u - 2 do
+        tris[#tris + 1] = { id(ri + 1, 0), id(ri, ci), id(ri, ci + 1) }
+      end
+    else
+      for ci = 0, u - 1 do
+        -- anéis da esfera vão de NORTE (ri) p/ SUL (ri+1) → winding espelhado vs lathe
+        local a, b = id(ri, ci), id(ri, ci + 1)
+        local c, d = id(ri + 1, ci), id(ri + 1, ci + 1)
+        tris[#tris + 1] = { a, b, c }
+        tris[#tris + 1] = { b, d, c }
+      end
+    end
+  end
+  return verts, tris
+end
+
+-- Lathe: perfil [[r, y], ...] girado em torno de Y (em (cx, cy, cz))
+function R3D2.latheTris(profile, segs, cx, cy, cz)
+  segs = math.max(3, math.floor(segs or 24))
+  if type(profile) ~= "table" or #profile < 2 then return nil, nil end
+  local verts, tris = {}, {}
+  local n = #profile
+  -- anéis: um por ponto de perfil (r pode ser 0 nos polos)
+  for pi = 1, n do
+    local rr, yy = profile[pi][1] or 0, profile[pi][2] or 0
+    for ci = 0, segs - 1 do
+      local th = (ci / segs) * 2 * math.pi
+      verts[#verts + 1] = { x = cx + rr * math.cos(th), y = cy + yy, z = cz + rr * math.sin(th) }
+    end
+  end
+  local function id(pi, ci) return ((pi - 1) * segs + (ci % segs)) + 1 end
+  -- centróide Y do perfil → decide se um polo é de "topo" (winding A) ou "base" (winding B)
+  local ycent = 0
+  for _, pp in ipairs(profile) do ycent = ycent + (pp[2] or 0) end
+  ycent = ycent / n
+  -- fan: P = polo, R(ci) = anel vizinho. topo: {P, R(ci+1), R(ci)} | base: {P, R(ci), R(ci+1)}
+  local function fan(poleId, ringIdx, poleY)
+    local topo = poleY >= ycent
+    for ci = 0, segs - 2 do
+      if topo then
+        tris[#tris + 1] = { poleId, id(ringIdx, ci + 1), id(ringIdx, ci) }
+      else
+        tris[#tris + 1] = { poleId, id(ringIdx, ci), id(ringIdx, ci + 1) }
+      end
+    end
+  end
+  for pi = 1, n - 1 do
+    local rTop = profile[pi][1] or 0
+    local rBot = profile[pi + 1][1] or 0
+    if rTop < 1e-4 and rBot < 1e-4 then
+      -- dois polos: pular
+    elseif rTop < 1e-4 then
+      fan(id(pi, 0), pi + 1, profile[pi][2] or 0)
+    elseif rBot < 1e-4 then
+      fan(id(pi + 1, 0), pi, profile[pi + 1][2] or 0)
+    else
+      for ci = 0, segs - 1 do
+        local a, b = id(pi, ci), id(pi, ci + 1)
+        local c, d = id(pi + 1, ci), id(pi + 1, ci + 1)
+        tris[#tris + 1] = { a, c, b }
+        tris[#tris + 1] = { b, c, d }
+      end
+    end
+  end
+  return verts, tris
+end
+
+-- Sweep: fatia retangular (w × h) ao longo de pts → triângulos (tubo/fia/caminho)
+-- corte: "rect" (w, h) ou "circle" (r)
+function R3D2.sweepTris(pts, w, h, corte, segPer)
+  local samples = R3D2.catmullRom(pts, segPer)
+  local n = #samples
+  if n < 2 then return nil, nil end
+  local verts, tris = {}, {}
+  local k = corte == "circle" and math.max(6, math.floor((w or 1) * 8 + 4)) or 4
+  -- perfis por amostra: vetores do corte em torno da tangente
+  local profs = {}
+  for si = 1, n do
+    local p = samples[si]
+    local t = vnorm(vsub(samples[math.min(n, si + 1)], samples[math.max(1, si - 1)]))
+    local up = v3(0, 1, 0)
+    if math.abs(vdot(t, up)) > 0.92 then up = v3(0, 0, 1) end
+    local nrm = vnorm(vcross(up, t))     -- lateral
+    local bin = vcross(t, nrm)           -- "cima" do tubo
+    local ring = {}
+    if corte == "circle" then
+      local r = (w or 1) / 2
+      for ci = 1, k do
+        local a = ((ci - 1) / k) * 2 * math.pi
+        ring[ci] = vadd(vscale(nrm, r * math.cos(a)), vscale(bin, r * math.sin(a)))
+      end
+    else
+      local hw, hh = (w or 1) / 2, (h or w or 1) / 2
+      -- retângulo de 4 vértices: topo-esq, topo-dir, baixo-dir, baixo-esq
+      ring[1] = vadd(vscale(nrm, -hw), vscale(bin, hh))
+      ring[2] = vadd(vscale(nrm, hw), vscale(bin, hh))
+      ring[3] = vadd(vscale(nrm, hw), vscale(bin, -hh))
+      ring[4] = vadd(vscale(nrm, -hw), vscale(bin, -hh))
+      k = 4
+    end
+    profs[si] = { ring = ring, t = t, p = p }
+  end
+  -- emitir vértices (n × k) e faixas de quads (winding: olhando de dentro pra fora)
+  for si = 1, n do
+    for ci = 1, k do
+      verts[#verts + 1] = vadd(profs[si].p, profs[si].ring[ci])
+    end
+  end
+  local function vid(si, ci) return (si - 1) * k + ci end
+  for si = 1, n - 1 do
+    for ci = 1, k do
+      local c2 = (ci % k) + 1
+      local a, b = vid(si, ci), vid(si + 1, ci)
+      local c, d = vid(si, c2), vid(si + 1, c2)
+      -- winding: normal deve apontar pra fora (lado de nrm)
+      local e1 = vsub(verts[b], verts[a])
+      local e2 = vsub(verts[c], verts[a])
+      local nrm = vcross(e1, e2)
+      local outDir = profs[si].ring[ci]
+      if vdot(nrm, outDir) < 0 then
+        tris[#tris + 1] = { a, c, b }
+        tris[#tris + 1] = { b, c, d }
+      else
+        tris[#tris + 1] = { a, b, c }
+        tris[#tris + 1] = { b, d, c }
+      end
+    end
+  end
+  return verts, tris
+end
+
+-- Escada
+function R3D2.stairs(from, to, w, steps)
+  local f, t = R3D2.v3(from), R3D2.v3(to)
+  steps = math.max(2, math.floor(steps or 10))
+  local out = {}
+  local dy = t.y - f.y
+  local run = vsub(t, f); run.y = 0
+  local l = vlen(run)
+  if l < 1e-6 then return out end
+  local dir = vscale(run, 1 / l)
+  for i = 0, steps - 1 do
+    local c = vadd(f, vadd(vscale(dir, l * (i + 0.5) / steps), v3(0, dy * (i + 0.5) / steps, 0)))
+    out[#out + 1] = {
+      pos = c,
+      size = { math.max(0.5, w), math.max(0.1, dy / steps), l / steps * 1.08 },
+      rotY = math.atan(dir.x, dir.z),
+    }
+  end
+  return out
+end
+
+-- Parede com aberturas reais (porta/janela)
+-- from/to: extremos (mesma y), h: altura, t: espessura
+-- openings: [{pos=0..1, w=largura, h=altura, tipo="porta"|"janela"}]
+function R3D2.wall(from, to, h, t, openings)
+  local f, t2 = R3D2.v3(from), R3D2.v3(to)
+  local l = vlen(vsub(t2, f))
+  if l < 0.1 then return { parts = {}, openings = {} } end
+  local dir = vscale(vsub(t2, f), 1 / l)
+  local rotY = math.atan(dir.x, dir.z)
+  local parts, ops = {}, {}
+  h = math.max(0.3, h or 3)
+  t = math.max(0.2, t or 0.5)
+  -- corte os segmentos sólidos
+  local cuts = { { 0, 0 } }  -- {início, fim} em metros
+  local o = {}
+  for _, op in ipairs(openings or {}) do
+    local p = clamp(op.pos or 0.5, 0.02, 0.98)
+    local w = clamp(op.w or 1.5, 0.4, l * 0.9)
+    o[#o + 1] = { a = l * p - w / 2, b = l * p + w / 2, w = w, h = math.min(h, op.h or 2.2), tipo = op.tipo or "janela" }
+  end
+  table.sort(o, function(x, y) return x.a < y.a end)
+  local cursor = 0
+  -- eixos: local Z = ao longo da parede (rotY = atan2(dir.x, dir.z)), local X = espessura
+  local function seg(a, b)
+    if b - a > 0.08 then
+      local c = vadd(f, vadd(vscale(dir, (a + b) / 2), v3(0, h / 2, 0)))
+      parts[#parts + 1] = { pos = c, size = { t, h, b - a }, rotY = rotY }
+    end
+  end
+  for _, op in ipairs(o) do
+    seg(cursor, math.max(cursor, op.a))
+    -- lintel (acima da abertura)
+    if op.h < h - 0.05 then
+      local c = vadd(f, vadd(vscale(dir, (op.a + op.b) / 2), v3(0, (h + op.h) / 2, 0)))
+      parts[#parts + 1] = { pos = c, size = { t, h - op.h, op.w }, rotY = rotY }
+    end
+    -- peitoril (abaixo, só janela)
+    if op.tipo ~= "porta" and op.h < h then
+      local c = vadd(f, vadd(vscale(dir, (op.a + op.b) / 2), v3(0, (h - op.h) / 2, 0)))
+      parts[#parts + 1] = { pos = c, size = { t, h - op.h, op.w }, rotY = rotY }
+    end
+    local center = vadd(f, vadd(vscale(dir, (op.a + op.b) / 2), v3(0, op.h / 2, 0)))
+    ops[#ops + 1] = { pos = center, w = op.w, h = op.h, tipo = op.tipo, rotY = rotY }
+    cursor = math.max(cursor, op.b)
+  end
+  seg(cursor, l)
+  return { parts = parts, openings = ops }
+end
+
+-- Telhado em 2 águas: cumeeira A→B, pitch (0..1, altura/comp_água), width
+function R3D2.roof(A, B, pitch, width, rows)
+  local a, b = R3D2.v3(A), R3D2.v3(B)
+  local ab = vsub(b, a); ab.y = 0
+  local l = vlen(ab)
+  if l < 0.2 then return {} end
+  local dir = vscale(ab, 1 / l)
+  local rotY = math.atan(dir.x, dir.z)
+  rows = math.max(2, math.floor(rows or 5))
+  pitch = clamp(pitch or 0.5, 0.08, 1.5)
+  width = math.max(0.5, width or 4)
+  local out = {}
+  local step = (width / 2) / rows
+  for side = 1, 2 do
+    local sgn = side == 1 and 1 or -1
+    for r = 0, rows - 1 do
+      -- fileiro r: parte da cumeeira (r=0) e desce a água
+      local horiz = (width / 2) * (r + 0.5) / rows      -- distância horizontal da cumeeira
+      local yy = pitch * (width / 2) - pitch * horiz    -- altura da água nesse ponto
+      local mid = vlerp(a, b, 0.5)
+      local perp = v3(dir.z * sgn, 0, -dir.x * sgn)
+      local c = vadd(vadd(mid, vscale(perp, horiz)), v3(0, yy, 0))
+      out[#out + 1] = {
+        pos = c,
+        size = { step * 1.4, 0.14, l + 0.4 },
+        rotY = rotY,
+      }
+    end
+  end
+  return out
+end
+
+-- ---------------- materiais / cores ----------------
+local MAT = {
+  madeira = "Wood", teca = "Wood", madeira_escura = "Wood",
+  pedra = "Slate", rocha = "Slate", granito = "Slate",
+  tijolo = "Brick",
+  plastico = "Plastic", plastico_branco = "Plastic",
+  metal = "Metal", aco = "Metal", ferro = "Metal", aluminio = "Metal",
+  neon = "Neon", neao = "Neon",
+  marmore = "Marble", marmara = "Marble",
+  concreto = "Concrete", cimento = "Concrete",
+  grama = "Grass",
+  gelo = "Ice",
+  vidro = "Glass", agua = "Water", areia = "Sand",
+  slate = "Slate", brick = "Brick", marble = "Marble", grass = "Grass",
+  ice = "Ice", glass = "Glass", water = "Water", sand = "Sand",
+  neonsplit = "Neon",
+  folha = "Leather", couro = "Leather",
+  asfalto = "Asphalt",
+}
+function R3D2.matName(nome)
+  if type(nome) ~= "string" then return "Plastic" end
+  local k = nome:lower():gsub("%s+", "_")
+  return MAT[k] or "Plastic"
+end
+
+function R3D2.hexToRgb(h)
+  if type(h) ~= "string" then return nil end
+  local s = h:match("^#?%x+") or ""
+  if #s == 3 then s = s:sub(1, 1) .. s:sub(1, 1) .. s:sub(2, 2) .. s:sub(2, 2) .. s:sub(3, 3) .. s:sub(3, 3) end
+  if #s < 6 then return nil end
+  local r, g, b = tonumber(s:sub(1, 2), 16), tonumber(s:sub(3, 4), 16), tonumber(s:sub(5, 6), 16)
+  if not (r and g and b) then return nil end
+  return r, g, b
+end
+
+-- ---------------- expandOps: DSL → specs ----------------
+-- spec part:  {type="part", pos, size, rotY?, shape?, mat, cor, g?}
+-- spec mesh:  {type="smooth", gen="dome|lathe|sweep|arc|sphere", p=..., mat, cor, g?, fb=[parts]}
+-- spec extra: {type="light"|"particle"|"beam"|"placa"|"tela"|"decal", ...}
+
+local function clampNum(v, lo, hi, dft)
+  if type(v) ~= "number" or v ~= v then return dft end
+  return clamp(v, lo, hi)
+end
+
+local function addPart(ctx, spec)
+  if ctx.stats.parts >= ctx.budget then
+    ctx.stats.truncated = true
+    return false
+  end
+  spec.pos = R3D2.v3(spec.pos)
+  if math.abs(spec.pos.y) > 400 or math.abs(spec.pos.x) > 500 or math.abs(spec.pos.z) > 500 then
+    return false
+  end
+  ctx.stats.parts = ctx.stats.parts + 1
+  ctx.parts[#ctx.parts + 1] = spec
+  return true
+end
+
+local smoothCount = 0
+local function addSmooth(ctx, spec, fbParts)
+  -- custo = nº de fallback parts (pior caso sem mesh)
+  smoothCount = smoothCount + 1
+  spec._id = smoothCount
+  local cost = #fbParts
+  if ctx.stats.parts + cost > ctx.budget then
+    ctx.stats.truncated = true
+    cost = math.max(0, ctx.budget - ctx.stats.parts)
+  end
+  for i = 1, cost do
+    ctx.stats.parts = ctx.stats.parts + 1
+    fbParts[i]._fbOf = spec._id
+    ctx.parts[#ctx.parts + 1] = fbParts[i]
+  end
+  spec.fbCount = cost
+  ctx.smooths[#ctx.smooths + 1] = spec
+end
+
+local function partSpec(ctx, op)
+  local pos = R3D2.v3(op.pos)
+  local size = R3D2.v3(op.size)
+  if size.x < 0.03 or size.y < 0.03 or size.z < 0.03 then return end
+  if size.x > 300 or size.y > 300 or size.z > 300 then return end
+  addPart(ctx, {
+    type = "part",
+    pos = pos,
+    size = size,
+    rotY = math.rad(op.rot and op.rot[2] or (op.rotY or 0)),
+    shape = op.shape,
+    mat = op.mat,
+    cor = op.cor,
+    g = op.g,
+  })
+end
+
+local OPS = {}
+
+function OPS.box(op, ctx)
+  partSpec(ctx, op)
+end
+
+function OPS.cyl(op, ctx)
+  local r = clampNum(op.r, 0.05, 150, 1)
+  local h = clampNum(op.h, 0.05, 300, 2)
+  local pos = R3D2.v3(op.pos)
+  local segs = math.floor(clampNum(op.segs, 4, 64, 20))
+  local mat = op.mat or "plastico"
+  local cor = op.cor
+  local g = op.g
+  -- fallback: anel de caixas
+  local per = math.max(4, math.floor(segs))
+  local fb = {}
+  local chord = 2 * r * math.sin(math.pi / per)
+  for i = 0, per - 1 do
+    local a = (i / per) * 2 * math.pi
+    fb[#fb + 1] = {
+      type = "part",
+      pos = v3(pos.x + r * math.cos(a), pos.y, pos.z + r * math.sin(a)),
+      size = v3(chord * 1.05, h, chord * 1.05),
+      rotY = -a,
+      mat = mat, cor = cor, g = g,
+    }
+  end
+  if op.smooth ~= false and segs > 8 then
+    -- mesh: lathe simples (cilindro com topo/base fechados)
+    local profile = { { 0, -h / 2 }, { r, -h / 2 }, { r, h / 2 }, { 0, h / 2 } }
+    local verts, tris = R3D2.latheTris(profile, segs, 0, 0, 0)
+    if verts and #tris > 0 then
+      addSmooth(ctx, {
+        type = "smooth", gen = "lathe",
+        p = { profile = profile, segs = segs },
+        cfr = { pos.x, pos.y, pos.z },
+        mat = mat, cor = cor, g = g,
+        verts = verts, tris = tris,
+      }, fb)
+      return
+    end
+  end
+  for i = 1, #fb do
+    if ctx.stats.parts >= ctx.budget then ctx.stats.truncated = true break end
+    ctx.stats.parts = ctx.stats.parts + 1
+    ctx.parts[#ctx.parts + 1] = fb[i]
+  end
+end
+
+function OPS.arc(op, ctx)
+  local cx, cz = (op.center and op.center[1]) or 0, (op.center and op.center[3]) or 0
+  local r = clampNum(op.r, 0.3, 300, 5)
+  local y = clampNum(op.y or (op.center and op.center[2]) or 0, -200, 400, 0)
+  local h = clampNum(op.h, 0.1, 200, 2)
+  local w = clampNum(op.w or op.t, 0.2, 50, 0.8)
+  local a0, a1 = clampNum(op.a0, -360, 720, 0), clampNum(op.a1, -360, 720, 180)
+  local segs = math.floor(clampNum(op.segs, 4, 200, 32))
+  local mat = op.mat or "pedra"
+  local cor = op.cor
+  local g = op.g or "arc_" .. ctx.stats.parts
+  local pts = R3D2.arcPts(cx, cz, r, y + h / 2, a0, a1, segs)
+  local sweepLen = r * math.abs(a1 - a0) * math.pi / 180
+  local stepLen = sweepLen / #pts * 1.15
+  -- fallback: caixas tangenciais
+  local fb = {}
+  for _, p in ipairs(pts) do
+    fb[#fb + 1] = {
+      type = "part",
+      pos = v3(p.x, p.y, p.z),
+      size = v3(w, h, stepLen),
+      rotY = -p.ang,
+      mat = mat, cor = cor, g = g,
+    }
+  end
+  -- mesh: ribbon ao longo do arco (se segs razoável)
+  if op.smooth ~= false and #pts >= 6 then
+    local mpts = {}
+    for _, p in ipairs(pts) do mpts[#mpts + 1] = v3(p.x, p.y, p.z) end
+    local verts, tris = R3D2.sweepTris(mpts, stepLen, h, "rect", 2)
+    if verts and #tris > 0 then
+      addSmooth(ctx, {
+        type = "smooth", gen = "sweep",
+        p = { pts = mpts, w = stepLen, h = h },
+        mat = mat, cor = cor, g = g,
+        verts = verts, tris = tris,
+      }, fb)
+      return
+    end
+  end
+  for i = 1, #fb do
+    if ctx.stats.parts >= ctx.budget then ctx.stats.truncated = true break end
+    ctx.stats.parts = ctx.stats.parts + 1
+    ctx.parts[#ctx.parts + 1] = fb[i]
+  end
+end
+
+function OPS.ring(op, ctx)
+  local c = op.center or { 0, 0, 0 }
+  local cx, cy, cz = c[1], c[2], c[3]
+  local r0 = clampNum(op.r0, 0, 300, 3)
+  local r1 = clampNum(op.r1, 0.1, 300, 5)
+  if r1 <= r0 then r1 = r0 + 1 end
+  local h = clampNum(op.h, 0.05, 100, 0.4)
+  local segs = math.floor(clampNum(op.segs, 8, 128, 48))
+  local mat = op.mat or "plastico"
+  local cor = op.cor
+  local g = op.g or "ring_" .. ctx.stats.parts
+  local rMid = (r0 + r1) / 2
+  local w = r1 - r0
+  local pts = R3D2.arcPts(cx, cz, rMid, cy + h / 2, 0, 360, segs)
+  local stepLen = (2 * math.pi * rMid) / #pts * 1.18
+  local fb = {}
+  for _, p in ipairs(pts) do
+    fb[#fb + 1] = {
+      type = "part",
+      pos = v3(p.x, p.y, p.z),
+      size = v3(w, h, stepLen),
+      rotY = -p.ang,
+      mat = mat, cor = cor, g = g,
+    }
+  end
+  if op.smooth ~= false and #pts >= 10 then
+    local mpts = {}
+    for _, p in ipairs(pts) do mpts[#mpts + 1] = v3(p.x, p.y, p.z) end
+    -- fecha o loop
+    mpts[#mpts + 1] = v3(mpts[1].x, mpts[1].y, mpts[1].z)
+    local verts, tris = R3D2.sweepTris(mpts, w, h, "rect", 2)
+    if verts and #tris > 0 then
+      addSmooth(ctx, { type = "smooth", gen = "sweep", p = { pts = mpts, w = w, h = h }, mat = mat, cor = cor, g = g, verts = verts, tris = tris }, fb)
+      return
+    end
+  end
+  for i = 1, #fb do
+    if ctx.stats.parts >= ctx.budget then ctx.stats.truncated = true break end
+    ctx.stats.parts = ctx.stats.parts + 1
+    ctx.parts[#ctx.parts + 1] = fb[i]
+  end
+end
+
+function OPS.dome(op, ctx)
+  local c = op.center or { 0, 0, 0 }
+  local cx, cy, cz = c[1], c[2], c[3]
+  local r = clampNum(op.r, 0.3, 200, 5)
+  local u = math.floor(clampNum(op.u, 6, 64, 20))
+  local vv = math.floor(clampNum(op.v or op.rings, 3, 32, 9))
+  local h = op.h  -- altura opcional do domo (se não, hemisfério)
+  local mat = op.mat or "concreto"
+  local cor = op.cor
+  local g = op.g or "dome_" .. ctx.stats.parts
+  local verts, tris = R3D2.sphereTris(cx, cy, cz, r, u, vv, true)
+  -- fallback: caixas lat-long
+  local fb = {}
+  local cellW = (2 * math.pi * r) / u * 1.3
+  for ri = 1, vv do
+    local phi = (ri / vv) * math.pi / 2
+    local ringR = r * math.sin(phi)
+    local ringY = cy + r * math.cos(phi)
+    local nInRing = math.max(3, math.floor(u * math.sin(phi)))
+    local depth = math.max(0.35, 2 * ringR * math.sin(math.pi / nInRing)) * 1.15
+    for ci = 0, nInRing - 1 do
+      local th = (ci / nInRing) * 2 * math.pi
+      fb[#fb + 1] = {
+        type = "part",
+        pos = v3(cx + ringR * math.cos(th), ringY, cz + ringR * math.sin(th)),
+        size = v3(depth, (r * math.pi / 2 / vv) * 1.5, cellW),
+        rotY = -th,
+        mat = mat, cor = cor, g = g,
+      }
+    end
+  end
+  addSmooth(ctx, { type = "smooth", gen = "dome", p = { center = { cx, cy, cz }, r = r, u = u, v = vv }, mat = mat, cor = cor, g = g, verts = verts, tris = tris }, fb)
+end
+
+function OPS.sphere(op, ctx)
+  local c = op.center or op.pos or { 0, 1, 0 }
+  local cx, cy, cz = c[1], c[2], c[3]
+  local r = clampNum(op.r, 0.1, 150, 1.5)
+  local u = math.floor(clampNum(op.u, 6, 64, 14))
+  local vv = math.floor(clampNum(op.v, 4, 32, 8))
+  local mat = op.mat or "plastico"
+  local cor = op.cor
+  local g = op.g or "sph_" .. ctx.stats.parts
+  local verts, tris = R3D2.sphereTris(cx, cy, cz, r, u, vv, false)
+  local fb = {}
+  for ri = 0, vv do
+    local phi = (ri / vv) * math.pi
+    local ringR = r * math.sin(phi)
+    local ringY = cy + r * math.cos(phi)
+    local nInRing = math.max(3, math.floor(u * math.sin(phi)))
+    local cellW = (2 * math.pi * r) / u * 1.3
+    for ci = 0, nInRing - 1 do
+      local th = (ci / nInRing) * 2 * math.pi
+      fb[#fb + 1] = {
+        type = "part",
+        pos = v3(cx + ringR * math.cos(th), ringY, cz + ringR * math.sin(th)),
+        size = v3(cellW * 0.9, (2 * math.pi * r / vv) * 0.6, cellW),
+        rotY = -th,
+        mat = mat, cor = cor, g = g,
+      }
+    end
+  end
+  addSmooth(ctx, { type = "smooth", gen = "sphere", p = { center = { cx, cy, cz }, r = r, u = u, v = vv }, mat = mat, cor = cor, g = g, verts = verts, tris = tris }, fb)
+end
+
+function OPS.lathe(op, ctx)
+  local c = op.center or { 0, 0, 0 }
+  local cx, cy, cz = c[1], c[2], c[3]
+  local profile = op.profile
+  local segs = math.floor(clampNum(op.segs, 6, 96, 24))
+  local mat = op.mat or "plastico"
+  local cor = op.cor
+  local g = op.g or "lathe_" .. ctx.stats.parts
+  if type(profile) ~= "table" or #profile < 2 then return end
+  local verts, tris = R3D2.latheTris(profile, segs, 0, 0, 0)
+  -- fallback: anéis de caixas
+  local fb = {}
+  local maxR = 0
+  for _, pp in ipairs(profile) do maxR = math.max(maxR, pp[1] or 0) end
+  for pi = 1, #profile - 1 do
+    local rMid = ((profile[pi][1] or 0) + (profile[pi + 1][1] or 0)) / 2
+    local yMid = (profile[pi][2] or 0) + ((profile[pi + 1][2] or 0) - (profile[pi][2] or 0)) / 2
+    if rMid > 0.02 then
+      local hSeg = math.max(0.15, (profile[pi + 1][2] or 0) - (profile[pi][2] or 0))
+      local n = math.max(6, math.floor(segs * math.min(1, rMid / math.max(0.5, maxR))))
+      local cellW = (2 * math.pi * rMid) / n * 1.2
+      for ci = 0, n - 1 do
+        local th = (ci / n) * 2 * math.pi
+        fb[#fb + 1] = {
+          type = "part",
+          pos = v3(cx + rMid * math.cos(th), cy + yMid, cz + rMid * math.sin(th)),
+          size = v3(cellW * 0.8, hSeg * 1.1, cellW),
+          rotY = -th,
+          mat = mat, cor = cor, g = g,
+        }
+      end
+    end
+  end
+  addSmooth(ctx, { type = "smooth", gen = "lathe", p = { profile = profile, segs = segs }, cfr = { cx, cy, cz }, mat = mat, cor = cor, g = g, verts = verts, tris = tris }, fb)
+end
+
+function OPS.sweep(op, ctx)
+  local raw = op.pts
+  if type(raw) ~= "table" or #raw < 2 then return end
+  local pts = {}
+  for i = 1, #raw do pts[i] = R3D2.v3(raw[i]) end
+  local w = clampNum(op.w, 0.05, 60, 1)
+  local h = clampNum(op.h or op.w, 0.05, 60, 1)
+  local corte = op.corte or "rect"
+  local segPer = math.floor(clampNum(op.seg or op.segs, 2, 24, 6))
+  local mat = op.mat or "plastico"
+  local cor = op.cor
+  local g = op.g or "sw_" .. ctx.stats.parts
+  local verts, tris = R3D2.sweepTris(pts, w, h, corte, segPer)
+  -- fallback: caixas ao longo da curva
+  local fb = {}
+  local samples = R3D2.catmullRom(pts, segPer)
+  for i = 1, #samples do
+    local p = samples[i]
+    local p2 = samples[math.min(#samples, i + 1)] or samples[1]
+    local segLen = vlen(vsub(p2, p))
+    local t = vnorm(vsub(p2, samples[math.max(1, i - 1)]))
+    fb[#fb + 1] = {
+      type = "part",
+      pos = p,
+      size = v3(w, h, math.max(0.6, segLen * 1.35)),
+      rotY = math.atan(t.x, t.z),
+      mat = mat, cor = cor, g = g,
+    }
+  end
+  if verts and #tris > 0 then
+    addSmooth(ctx, { type = "smooth", gen = "sweep", p = { pts = pts, w = w, h = h, corte = corte }, mat = mat, cor = cor, g = g, verts = verts, tris = tris }, fb)
+    return
+  end
+  for i = 1, #fb do
+    if ctx.stats.parts >= ctx.budget then ctx.stats.truncated = true break end
+    ctx.stats.parts = ctx.stats.parts + 1
+    ctx.parts[#ctx.parts + 1] = fb[i]
+  end
+end
+
+function OPS.stair(op, ctx)
+  local from = op.from or op.pos or { 0, 0, 0 }
+  local to = op.to or vadd(R3D2.v3(from), v3(0, 2, 6))
+  local w = clampNum(op.w, 0.6, 30, 2)
+  local steps = math.floor(clampNum(op.steps, 2, 60, 10))
+  local mat = op.mat or "concreto"
+  local cor = op.cor
+  local g = op.g
+  for _, st in ipairs(R3D2.stairs(from, to, w, steps)) do
+    addPart(ctx, { type = "part", pos = st.pos, size = st.size, rotY = st.rotY, mat = mat, cor = cor, g = g })
+  end
+end
+
+function OPS.wall(op, ctx)
+  local from = op.from or { 0, 0, 0 }
+  local to = op.to or vadd(R3D2.v3(from), v3(10, 0, 0))
+  local h = clampNum(op.h, 0.5, 60, 3.2)
+  local t = clampNum(op.t or op.thick, 0.2, 6, 0.5)
+  local mat = op.mat or "tijolo"
+  local cor = op.cor
+  local g = op.g or "wall_" .. ctx.stats.parts
+  local res = R3D2.wall(from, to, h, t, op.openings)
+  for _, p in ipairs(res.parts) do
+    addPart(ctx, { type = "part", pos = p.pos, size = p.size, rotY = p.rotY, mat = mat, cor = cor, g = g })
+  end
+  -- aberturas: porta/janela com moldura + vidro
+  for _, o in ipairs(res.openings) do
+    local fm = op.moldura or "madeira"
+    local fh = clampNum(op.moldura_h, 0.08, 0.6, 0.25)
+    local cx, cy, cz = o.pos.x, o.pos.y, o.pos.z
+    local dirx, dirz = math.sin(o.rotY), math.cos(o.rotY)
+    local fw = o.w
+    local fhgt = o.h
+    local s = t + 0.12
+    -- montantes (laterais)
+    addPart(ctx, { type = "part", pos = v3(cx - dirx * fw / 2, cy + fhgt / 2, cz - dirz * fw / 2), size = v3(s, fhgt, fh), rotY = o.rotY, mat = fm, cor = op.moldura_cor, g = g })
+    addPart(ctx, { type = "part", pos = v3(cx + dirx * fw / 2, cy + fhgt / 2, cz + dirz * fw / 2), size = v3(s, fhgt, fh), rotY = o.rotY, mat = fm, cor = op.moldura_cor, g = g })
+    -- verga (topo)
+    addPart(ctx, { type = "part", pos = v3(cx, cy + fhgt / 2 + fh / 2, cz), size = v3(s, fh, fw + fh), rotY = o.rotY, mat = fm, cor = op.moldura_cor, g = g })
+    -- peitoril (só janela)
+    if o.tipo ~= "porta" then
+      addPart(ctx, { type = "part", pos = v3(cx, cy - fhgt / 2 + fh / 2, cz), size = v3(s, fh, fw), rotY = o.rotY, mat = fm, cor = op.moldura_cor, g = g })
+    end
+    -- vidro / folha da porta
+    if o.tipo == "janela" then
+      addPart(ctx, { type = "part", pos = v3(cx, cy, cz), size = v3(t * 0.5, fhgt - fh, fw - fh), rotY = o.rotY, mat = "vidro", cor = "#bfe3ff", g = g })
+    else
+      addPart(ctx, { type = "part", pos = v3(cx, cy, cz), size = v3(t * 0.8, fhgt - fh, fw - fh), rotY = o.rotY, mat = "madeira", cor = op.cor or "#5b3a21", g = g })
+      -- maçaneta
+      addPart(ctx, { type = "part", pos = v3(cx + dirx * fw * 0.32, cy, cz + dirz * fw * 0.32), size = v3(0.12, 0.12, 0.12), mat = "metal", cor = "#e8c25a", g = g })
+    end
+  end
+end
+
+function OPS.roof(op, ctx)
+  local A = op.a or op.from or { 0, 3, -4 }
+  local B = op.b or op.to or { 0, 3, 4 }
+  local pitch = clampNum(op.pitch, 0.08, 1.5, 0.5)
+  local width = clampNum(op.w or op.width, 1, 60, 8)
+  local rows = math.floor(clampNum(op.rows, 2, 24, 6))
+  local mat = op.mat or "tijolo"
+  local cor = op.cor
+  local g = op.g or "roof_" .. ctx.stats.parts
+  for _, r in ipairs(R3D2.roof(A, B, pitch, width, rows)) do
+    addPart(ctx, { type = "part", pos = r.pos, size = r.size, rotY = r.rotY, mat = mat, cor = cor, g = g })
+  end
+end
+
+function OPS.column(op, ctx)
+  local pos = R3D2.v3(op.pos)
+  local r = clampNum(op.r, 0.1, 20, 0.5)
+  local hh = clampNum(op.h, 0.5, 80, 4)
+  local mat = op.mat or "marmore"
+  local cor = op.cor
+  local g = op.g
+  -- base + coluna (cyl liso) + capital
+  addPart(ctx, { type = "part", pos = v3(pos.x, pos.y + 0.15, pos.z), size = v3(r * 2.8, 0.3, r * 2.8), mat = mat, cor = cor, g = g })
+  OPS.cyl({ pos = { pos.x, pos.y + hh / 2 + 0.3, pos.z }, r = r, h = hh, segs = op.segs or 16, mat = mat, cor = cor, g = g }, ctx)
+  addPart(ctx, { type = "part", pos = v3(pos.x, pos.y + hh + 0.36, pos.z), size = v3(r * 2.8, 0.32, r * 2.8), mat = mat, cor = cor, g = g })
+end
+
+function OPS.window(op, ctx)
+  local pos = R3D2.v3(op.pos)
+  local w = clampNum(op.w, 0.5, 20, 1.5)
+  local h = clampNum(op.h, 0.5, 20, 2)
+  local t = clampNum(op.t or op.thick, 0.1, 2, 0.3)
+  local rotY = math.rad(op.rot or op.facing or 0)
+  local fm = op.mat or "madeira"
+  local fh = 0.22
+  local g = op.g
+  local dx, dz = math.sin(rotY), math.cos(rotY)
+  -- moldura (largura ao longo da parede = local Z)
+  addPart(ctx, { type = "part", pos = v3(pos.x - dx * w / 2, pos.y + h / 2, pos.z - dz * w / 2), size = v3(t, h, fh), rotY = rotY, mat = fm, g = g })
+  addPart(ctx, { type = "part", pos = v3(pos.x + dx * w / 2, pos.y + h / 2, pos.z + dz * w / 2), size = v3(t, h, fh), rotY = rotY, mat = fm, g = g })
+  addPart(ctx, { type = "part", pos = v3(pos.x, pos.y + h / 2, pos.z), size = v3(t, fh, w + fh), rotY = rotY, mat = fm, g = g })
+  addPart(ctx, { type = "part", pos = v3(pos.x, pos.y, pos.z), size = v3(t, fh, w), rotY = rotY, mat = fm, g = g })
+  -- vidro
+  addPart(ctx, { type = "part", pos = v3(pos.x, pos.y + h / 2, pos.z), size = v3(t * 0.4, h - fh, w - fh), rotY = rotY, mat = "vidro", cor = "#bfe3ff", g = g })
+end
+
+function OPS.door(op, ctx)
+  local pos = R3D2.v3(op.pos)
+  local w = clampNum(op.w, 0.8, 12, 1.7)
+  local h = clampNum(op.h, 1, 16, 3)
+  local t = clampNum(op.t or op.thick, 0.1, 2, 0.3)
+  local rotY = math.rad(op.rot or op.facing or 0)
+  local fm = op.mat or "madeira"
+  local fh = 0.24
+  local g = op.g
+  local dx, dz = math.sin(rotY), math.cos(rotY)
+  addPart(ctx, { type = "part", pos = v3(pos.x - dx * w / 2, pos.y + h / 2, pos.z - dz * w / 2), size = v3(t, h, fh), rotY = rotY, mat = fm, g = g })
+  addPart(ctx, { type = "part", pos = v3(pos.x + dx * w / 2, pos.y + h / 2, pos.z + dz * w / 2), size = v3(t, h, fh), rotY = rotY, mat = fm, g = g })
+  addPart(ctx, { type = "part", pos = v3(pos.x, pos.y + h - fh / 2, pos.z), size = v3(t, fh, w + fh), rotY = rotY, mat = fm, g = g })
+  addPart(ctx, { type = "part", pos = v3(pos.x, pos.y + h / 2 - fh / 2, pos.z), size = v3(t * 0.7, h - fh, w - fh), rotY = rotY, mat = "madeira", cor = op.cor or "#5b3a21", g = g })
+  addPart(ctx, { type = "part", pos = v3(pos.x + dx * w * 0.3, pos.y + h * 0.45, pos.z + dz * w * 0.3), size = v3(0.14, 0.14, 0.14), mat = "metal", cor = "#e8c25a", g = g })
+end
+
+function OPS.fence(op, ctx)
+  local from = op.from or { 0, 0, 0 }
+  local to = op.to or vadd(R3D2.v3(from), v3(10, 0, 0))
+  local h = clampNum(op.h, 0.5, 10, 1.2)
+  local rails = math.floor(clampNum(op.rails, 1, 5, 3))
+  local mat = op.mat or "madeira"
+  local cor = op.cor
+  local g = op.g
+  local f, t2 = R3D2.v3(from), R3D2.v3(to)
+  local l = vlen(vsub(t2, f))
+  local dir = vscale(vsub(t2, f), 1 / math.max(1e-6, l))
+  local rotY = math.atan(dir.x, dir.z)
+  local nPost = math.max(2, math.floor(l / clampNum(op.post, 0.5, 10, 2)) + 1)
+  for i = 0, nPost - 1 do
+    local c = vadd(f, vscale(dir, i / math.max(1, nPost - 1) * l))
+    addPart(ctx, { type = "part", pos = v3(c.x, c.y + h / 2, c.z), size = v3(0.18, h, 0.18), mat = mat, cor = cor, g = g })
+  end
+  for r = 1, rails do
+    local yy = (f.y or 0) + h * r / rails
+    local mid = vlerp(f, t2, 0.5)
+    addPart(ctx, { type = "part", pos = v3(mid.x, yy, mid.z), size = v3(0.12, 0.12, l), rotY = rotY, mat = mat, cor = cor, g = g })
+  end
+end
+
+function OPS.tree(op, ctx)
+  local pos = R3D2.v3(op.pos)
+  local hh = clampNum(op.h, 2, 40, 8)
+  local typ = op.tipo or "redondo"
+  local matT = "madeira"
+  local matF = op.folhas or "grama"
+  local corF = op.cor or nil
+  local g = op.g or "tree_" .. ctx.stats.parts
+  local trunkH = hh * 0.45
+  OPS.cyl({ pos = { pos.x, pos.y + trunkH / 2, pos.z }, r = hh * 0.06, h = trunkH, segs = 10, mat = matT, cor = "#6b4a2b", g = g }, ctx)
+  if typ == "palm" then
+    local cy = pos.y + trunkH
+    for i = 0, 5 do
+      local a = i / 5 * 2 * math.pi
+      addPart(ctx, { type = "part", pos = v3(pos.x + math.cos(a) * hh * 0.3, cy + 0.2, pos.z + math.sin(a) * hh * 0.3), size = v3(hh * 0.14, 0.18, hh * 0.5), rotY = math.pi / 2 - a, mat = matF, cor = corF, g = g })
+    end
+  elseif typ == "pine" then
+    for i = 0, 2 do
+      local ry = pos.y + trunkH + i * hh * 0.2
+      local rr = hh * (0.32 - i * 0.08)
+      OPS.cyl({ pos = { pos.x, ry + hh * 0.1, pos.z }, r = rr, h = hh * 0.24, segs = 12, mat = matF, cor = corF, g = g }, ctx)
+    end
+  else
+    OPS.dome({ center = { pos.x, pos.y + trunkH + hh * 0.15, pos.z }, r = hh * 0.35, u = 12, v = 6, mat = matF, cor = corF, g = g }, ctx)
+    OPS.sphere({ center = { pos.x + hh * 0.18, pos.y + trunkH + hh * 0.05, pos.z + hh * 0.12 }, r = hh * 0.22, u = 10, v = 5, mat = matF, cor = corF, g = g }, ctx)
+  end
+end
+
+function OPS.rock(op, ctx)
+  local pos = R3D2.v3(op.pos)
+  local s = clampNum(op.s or op.size, 0.5, 40, 2)
+  local n = math.floor(clampNum(op.n or op.pedras, 3, 14, 6))
+  local mat = op.mat or "pedra"
+  local cor = op.cor
+  local g = op.g or "rock_" .. ctx.stats.parts
+  for i = 1, n do
+    local a = (i / n) * 2 * math.pi + i * 1.7
+    local rr = s * 0.4 * ((i * 37 % 10) / 10 + 0.4)
+    local sz = s * (0.35 + ((i * 53 % 10) / 10) * 0.4)
+    addPart(ctx, {
+      type = "part",
+      pos = v3(pos.x + math.cos(a) * rr, pos.y + sz * 0.3, pos.z + math.sin(a) * rr),
+      size = v3(sz, sz * 0.7, sz * 0.9),
+      rotY = a * 2,
+      shape = "wedge",
+      mat = mat, cor = cor, g = g,
+    })
+  end
+end
+
+function OPS.mesh(op, ctx)
+  -- triângulos custom (só com EditableMesh ativo; senão caixa de contorno)
+  local verts, tris = op.verts, op.tris
+  if type(verts) ~= "table" or type(tris) ~= "table" or #verts < 3 or #tris < 1 then return end
+  local pos = R3D2.v3(op.pos or { 0, 0, 0 })
+  local mat = op.mat or "plastico"
+  local cor = op.cor
+  local triCost = math.min(#tris, 20000)
+  -- caixa delimitadora (fallback sem EditableMesh)
+  local minx, miny, minz, maxx, maxy, maxz = 1e9, 1e9, 1e9, -1e9, -1e9, -1e9
+  for _, vt in ipairs(verts) do
+    minx = math.min(minx, vt[1] or 0); miny = math.min(miny, vt[2] or 0); minz = math.min(minz, vt[3] or 0)
+    maxx = math.max(maxx, vt[1] or 0); maxy = math.max(maxy, vt[2] or 0); maxz = math.max(maxz, vt[3] or 0)
+  end
+  local bbox = { {
+    type = "part",
+    pos = v3(pos.x + (minx + maxx) / 2, pos.y + (miny + maxy) / 2, pos.z + (minz + maxz) / 2),
+    size = v3(math.max(0.3, maxx - minx), math.max(0.3, maxy - miny), math.max(0.3, maxz - minz)),
+    mat = mat, cor = cor,
+  } }
+  if triCost > 200 and (not ctx.emOk) then
+    addPart(ctx, bbox[1])
+    return
+  end
+  addSmooth(ctx, {
+    type = "smooth", gen = "custom",
+    p = { verts = verts, tris = tris },
+    cfr = { pos.x, pos.y, pos.z, math.rad(op.rot or op.rotY or 0) },
+    mat = mat, cor = cor, g = op.g,
+    custom = true,
+  }, bbox)
+  ctx.stats.triEm = (ctx.stats.triEm or 0) + triCost
+end
+
+-- extras (não consomem budget de parts)
+function OPS.light(op, ctx)
+  ctx.extras[#ctx.extras + 1] = { type = "light", pos = R3D2.v3(op.pos), tipo = op.tipo or op.type or "point", cor = op.cor, int = op.int or 2, range = op.range }
+end
+function OPS.particle(op, ctx)
+  ctx.extras[#ctx.extras + 1] = { type = "particle", pos = R3D2.v3(op.pos), tipo = op.tipo or op.type or "brilho", dir = R3D2.v3(op.dir or { 0, 1, 0 }), size = op.size, rate = op.rate }
+end
+function OPS.beam(op, ctx)
+  ctx.extras[#ctx.extras + 1] = { type = "beam", from = R3D2.v3(op.from), to = R3D2.v3(op.to), cor = op.cor, w = op.w or 0.15, sag = op.sag or 0 }
+end
+function OPS.placa(op, ctx)
+  ctx.extras[#ctx.extras + 1] = { type = "placa", pos = R3D2.v3(op.pos), text = tostring(op.text or ""), w = op.w or 3, h = op.h or 1, rotY = math.rad(op.rot or 0), cor = op.cor }
+end
+function OPS.tela(op, ctx)
+  ctx.extras[#ctx.extras + 1] = { type = "tela", pos = R3D2.v3(op.pos), w = op.w or 4, h = op.h or 2.5, rotY = math.rad(op.rot or 0), cor = op.cor or "#20242c" }
+end
+function OPS.decal(op, ctx)
+  ctx.extras[#ctx.extras + 1] = { type = "decal", pos = R3D2.v3(op.pos), rotY = math.rad(op.rot or 0), w = op.w or 2, h = op.h or 2, asset = op.asset, opacidade = op.opacidade or 0.8 }
+end
+function OPS.mood(op, ctx)
+  ctx.mood = { luz = op.luz or op.type, bloom = op.bloom, cor = op.cor }
+end
+
+OPS.caixa = OPS.box
+OPS.parede = OPS.wall
+OPS.escada = OPS.stair
+OPS.porta = OPS.door
+OPS.fachada = OPS.window
+OPS.arvore = OPS.tree
+OPS.pedra = OPS.rock
+OPS.luz = OPS.light
+OPS.particula = OPS.particle
+OPS.feixe = OPS.beam
+OPS.coluna = OPS.column
+
+local extraOps = { light = true, particula = true, particle = true, feixe = true, beam = true, placa = true, tela = true, decal = true, mood = true }
+
+function R3D2.expandOps(scene, opts)
+  opts = opts or {}
+  local ctx = {
+    parts = {}, smooths = {}, extras = {},
+    stats = { parts = 0, truncated = false, triEm = 0, ops = 0, skipped = 0 },
+    budget = math.floor(opts.budget or 3000),
+    emOk = opts.emOk or false,
+  }
+  if type(scene) ~= "table" then
+    return nil, "scene não é uma tabela"
+  end
+  -- ops[] (v2) + partes[] (v1 legacy)
+  local function opType(op)
+    -- só aceita STRING (se a IA escrevesse t:0.5, o "t" da parede seria nº)
+    for _, k in ipairs({ "t", "tipo", "type" }) do
+      local v = op[k]
+      if type(v) == "string" then return v:lower() end
+    end
+    return nil
+  end
+  local function handle(arr)
+    for _, op in ipairs(arr or {}) do
+      if type(op) == "table" and ctx.stats.ops < 1200 then
+        local t = opType(op)
+        -- recuperação: se a IA usou "t" p/ espessura (número), o tipo se perdeu;
+        -- from+to+openings/h só faz sentido p/ parede
+        if t == nil and op.from and op.to and (op.openings or op.h) then
+          t = "wall"
+        end
+        if t == "part" or (type(op.kind) == "string" and t == nil) then
+          -- formato v1: {kind, pos, size, mat, color, rot}
+          partSpec(ctx, {
+            pos = op.pos, size = op.size,
+            rot = op.rot, shape = nil,
+            mat = op.mat or op.material, cor = op.color or op.cor,
+          })
+        else
+          local key = type(t) == "string" and t:lower():gsub("%s+", "_") or nil
+          local h = OPS[key]
+          if h then
+            if extraOps[key] and #ctx.extras >= 60 then
+              ctx.stats.skipped = ctx.stats.skipped + 1
+            else
+              ctx.stats.ops = ctx.stats.ops + 1
+              local ok = pcall(h, op, ctx)
+              if not ok then ctx.stats.skipped = ctx.stats.skipped + 1 end
+            end
+          else
+            ctx.stats.skipped = ctx.stats.skipped + 1
+          end
+        end
+      end
+    end
+  end
+  -- formato v1 antigo (AllInOne 1.x): parts = [["box", size, pos, rot, mat, cor, nome], ...]
+  -- legado = barato: sphere/box viram 1 part (shape Ball), cylinder vira cyl compacto
+  local v1 = {}
+  for _, row in ipairs(scene.parts or {}) do
+    if type(row) == "table" and #row >= 5 and type(row[1]) == "string"
+      and type(row[2]) == "table" and type(row[3]) == "table" then
+      local kind = row[1]:lower()
+      if kind == "cylinder" or kind == "cilindro" then
+        v1[#v1 + 1] = { t = "cyl", pos = row[3], r = row[2][1], h = row[2][2] or row[2][1],
+          segs = 12, mat = row[5], cor = row[6], rotY = row[4] and row[4][2] or 0 }
+      elseif kind == "sphere" or kind == "esfera" then
+        local r = row[2][1] or 1
+        partSpec(ctx, { pos = row[3], size = { r * 2, r * 2, r * 2 }, rot = row[4],
+          shape = "ball", mat = row[5], cor = row[6] })
+      else
+        partSpec(ctx, { pos = row[3], size = row[2], rot = row[4], mat = row[5], cor = row[6] })
+      end
+    end
+  end
+  handle(scene.ops)
+  handle(scene.partes)  -- v1 legacy (client/server)
+  handle(v1)            -- v1 array (AllInOne 1.x)
+  return { parts = ctx.parts, smooths = ctx.smooths, extras = ctx.extras, mood = ctx.mood, stats = ctx.stats }, nil
+end
+
+-- ---------------- normalização de entrada (v1 + v2) ----------------
+function R3D2.normalizeScene(data)
+  if type(data) ~= "table" then return nil, "JSON inválido" end
+  return data, nil
+end
+
+-- ============================================================
+-- BUILD (somente Roblox)
+-- ============================================================
+local function hasRoblox()
+  return type(Instance) == "table" and type(game) == "table" and game ~= nil
+end
+
+function R3D2.probe()
+  -- detecta capacidades de mesh em runtime (tudo pcall: falha = sem a feature)
+  local cap = { union = false, sweep = false, emesh = false }
+  if not hasRoblox() then return cap end
+  pcall(function()
+    local GS = game:GetService("GeometryService")
+    local p1 = Instance.new("Part"); p1.Size = Vector3.new(2, 2, 2)
+    local p2 = Instance.new("Part"); p2.Size = Vector3.new(2, 2, 2); p2.CFrame = CFrame.new(1.5, 0, 0)
+    local ok, res = pcall(function()
+      return GS:UnionAsync(p1, { p2 }, { CollisionFidelity = Enum.CollisionFidelity.Hull })
+    end)
+    p1:Destroy(); p2:Destroy()
+    if ok and type(res) == "table" then
+      for _, r in ipairs(res) do pcall(function() r:Destroy() end) end
+      cap.union = true
+    end
+  end)
+  pcall(function()
+    if type(game:GetService("GeometryService").SweepPartAsync) == "function" then cap.sweep = true end
+  end)
+  pcall(function()
+    local em = game:GetService("AssetService"):CreateEditableMesh()
+    if em and type(em.AddVertex) == "function" then cap.emesh = true end
+  end)
+  return cap
+end
+
+local function makeColor(cor)
+  if not cor then return nil end
+  local r, g, b = R3D2.hexToRgb(cor)
+  if r then
+    if hasRoblox() then return Color3.fromRGB(r, g, b) end
+    return { r, g, b }
+  end
+  return nil
+end
+
+function R3D2.build(specs, parent, opts, onProgress)
+  if not hasRoblox() then
+    return nil, "build() só roda no Roblox"
+  end
+  opts = opts or {}
+  local cap = opts.capabilities or R3D2.probe()
+  local WS = game:GetService("Workspace")
+  local GS = game:GetService("GeometryService")
+  local AS = game:GetService("AssetService")
+  local nome = opts.nome or "Modelo"
+  local model = Instance.new("Model")
+  model.Name = nome
+  model.Parent = nil
+
+  local stats = { parts = 0, meshes = 0, tris = 0, merged = 0, em = 0 }
+  local function prog(msg) if onProgress then pcall(onProgress, msg, stats) end end
+  prog("criando model...")
+
+  local function matOf(spec)
+    local m = R3D2.matName(spec.mat)
+    local col = makeColor(spec.cor)
+    return m, col
+  end
+
+  -- 1) parts (fallbacks de ops smooth ficam RETIDOS sem parent)
+  local groupParts = {}
+  local heldFb = {}   -- smoothId → list of {p=part, sp=spec, done=bool}
+  local function placePart(p, sp)
+    if sp.g then
+      groupParts[sp.g] = groupParts[sp.g] or {}
+      groupParts[sp.g][#groupParts[sp.g] + 1] = p
+    else
+      p.Parent = model
+    end
+  end
+  for _, sp in ipairs(specs.parts or {}) do
+    if stats.parts >= (opts.maxParts or 3000) then break end
+    local m, col = matOf(sp)
+    local p
+    pcall(function()
+      local part = Instance.new("Part")
+      if sp.shape == "ball" then part.Shape = Enum.PartShape.Ball end
+      if sp.shape == "wedge" then part.Shape = Enum.PartShape.Wedge end
+      if sp.shape == "file" then part.Shape = Enum.PartShape.File end
+      if sp.shape == "coil" then part.Shape = Enum.PartShape.Coil end
+      part.Anchored = true
+      part.Massless = true
+      part.CanCollide = true
+      part.Material = Enum.Material[m] or Enum.Material.Plastic
+      if col then part.Color = col end
+      part.Size = Vector3.new(sp.size.x, sp.size.y, sp.size.z)
+      part.CFrame = CFrame.new(sp.pos.x, sp.pos.y, sp.pos.z) * CFrame.Angles(0, sp.rotY or 0, 0)
+      p = part
+    end)
+    if p then
+      stats.parts = stats.parts + 1
+      if sp._fbOf then
+        heldFb[sp._fbOf] = heldFb[sp._fbOf] or {}
+        heldFb[sp._fbOf][#heldFb[sp._fbOf] + 1] = { p = p, sp = sp, done = false }
+      else
+        placePart(p, sp)
+      end
+    end
+    if stats.parts % 120 == 0 then
+      prog(("%d parts..."):format(stats.parts))
+      task.wait()
+    end
+  end
+
+  -- 2) smooth ops: EditableMesh (mesh real de triângulos) → senão liberar fallback
+  local maxEm = opts.maxEm or 8
+  for _, sm in ipairs(specs.smooths or {}) do
+    local cv, ct
+    if sm.custom then cv, ct = sm.p and sm.p.verts, sm.p and sm.p.tris end
+    cv = cv or sm.verts
+    ct = ct or sm.tris
+    local wantEm = cap.emesh and stats.em < maxEm
+      and type(cv) == "table" and type(ct) == "table" and #ct > 0
+      and (stats.tris + #ct) <= (opts.maxTris or 120000)
+    local okM = false
+    if wantEm then
+      prog(("mesh real: %s (%d tris)..."):format(tostring(sm.gen), #ct))
+      okM = pcall(function()
+        local em = AS:CreateEditableMesh()
+        local vids = {}
+        for i, vt in ipairs(cv) do
+          vids[i] = em:AddVertex(Vector3.new(vt[1] or vt.x or 0, vt[2] or vt.y or 0, vt[3] or vt.z or 0))
+        end
+        for _, tr in ipairs(ct) do
+          em:AddTriangle(vids[tr[1]], vids[tr[2]], vids[tr[3]])
+        end
+        local mp = AS:CreateMeshPartAsync(Content.fromObject(em))
+        local mm, cc = matOf(sm)
+        local cfr = CFrame.new(0, 0, 0)
+        if sm.cfr then
+          cfr = CFrame.new(sm.cfr[1] or 0, sm.cfr[2] or 0, sm.cfr[3] or 0)
+          if sm.cfr[4] then cfr = cfr * CFrame.Angles(0, sm.cfr[4], 0) end
+        end
+        mp.CFrame = cfr
+        mp.Anchored = true
+        mp.CanCollide = true
+        mp.Material = Enum.Material[mm] or Enum.Material.Plastic
+        if cc then mp.Color = cc end
+        mp.Parent = model
+        stats.meshes = stats.meshes + 1
+        stats.tris = stats.tris + #ct
+        stats.em = stats.em + 1
+      end)
+    end
+    if not okM then
+      -- libera as parts de fallback (retidas no passo 1)
+      local held = heldFb[sm._id]
+      if held then
+        for _, item in ipairs(held) do
+          item.done = true
+          placePart(item.p, item.sp)
+        end
+      end
+    end
+    task.wait()
+  end
+  -- destrói fallbacks retidos cujo smooth virou mesh real
+  for _, fb in pairs(heldFb) do
+    for _, item in ipairs(fb) do
+      if not item.done then pcall(function() item.p:Destroy() end) end
+    end
+  end
+
+  -- 2) fusão booleana por grupo (meshes reais)
+  local function fuseGroup(gname, plist)
+    if #plist < 2 or not cap.union then return false end
+    if #plist > 400 then return false end
+    local main = plist[1]
+    local others = {}
+    for i = 2, #plist do others[i - 1] = plist[i] end
+    local ok, res = pcall(function()
+      return GS:UnionAsync(main, others, { CollisionFidelity = Enum.CollisionFidelity.Hull })
+    end)
+    if ok and type(res) == "table" and #res > 0 then
+      local m, col = matOf(plist[1])
+      for _, r in ipairs(res) do
+        pcall(function()
+          r.Parent = model
+          r.CFrame = main.CFrame
+          r.Anchored = true
+          r.CanCollide = true
+          r.Material = Enum.Material[m] or Enum.Material.Plastic
+          if col then r.Color = col end
+        end)
+      end
+      for _, o in ipairs(plist) do o.Parent = nil; pcall(function() o:Destroy() end) end
+      stats.merged = stats.merged + 1
+      stats.meshes = stats.meshes + #res
+      return true
+    end
+    return false
+  end
+
+  local fnames = {}
+  for k in pairs(groupParts) do fnames[#fnames + 1] = k end
+  table.sort(fnames)
+  for _, gn in ipairs(fnames) do
+    local plist = groupParts[gn]
+    prog(("fundindo '%s' (%d pçs)..."):format(tostring(gn):sub(1, 24), #plist))
+    local okF = fuseGroup(gn, plist)
+    if not okF then
+      for _, p in ipairs(plist) do p.Parent = model end
+    end
+    task.wait()
+  end
+
+  -- 4) extras
+  for _, ex in ipairs(specs.extras or {}) do
+    pcall(function()
+      if ex.type == "light" then
+        local lp = Instance.new("Part")
+        lp.Size = Vector3.new(0.6, 0.6, 0.6)
+        lp.Position = Vector3.new(ex.pos.x, ex.pos.y, ex.pos.z)
+        lp.Anchored = true
+        lp.CanCollide = false
+        lp.Material = Enum.Material.Neon
+        local col = makeColor(ex.cor)
+        if col then lp.Color = col end
+        lp.Parent = model
+        local lt
+        if ex.tipo == "spot" then
+          lt = Instance.new("SpotLight")
+          lt.Angle = 60
+        elseif ex.tipo == "surface" then
+          lt = Instance.new("SurfaceLight")
+        else
+          lt = Instance.new("PointLight")
+        end
+        lt.Brightness = clamp(ex.int or 2, 0.1, 10)
+        lt.Range = clamp(ex.range or 14, 2, 60)
+        if col then lt.Color = col end
+        lt.Parent = lp
+      elseif ex.type == "particle" then
+        local pp = Instance.new("Part")
+        pp.Size = Vector3.new(2, 2, 2)
+        pp.Position = Vector3.new(ex.pos.x, ex.pos.y, ex.pos.z)
+        pp.Anchored = true
+        pp.CanCollide = false
+        pp.Transparency = 1
+        pp.Parent = model
+        local em = Instance.new("ParticleEmitter")
+        em.Rate = clamp(ex.rate or 8, 0.5, 60)
+        em.Lifetime = NumberRange.new(0.8, 2.2)
+        em.Speed = NumberRange.new(1, 3)
+        local dir = ex.dir
+        em.DirectionalAngle = Vector2.new(20, 20)
+        local col = makeColor(ex.cor)
+        if ex.tipo == "fogo" then
+          em.Color = ColorSequence.new(Color3.fromRGB(255, 180, 60), Color3.fromRGB(255, 60, 20))
+          em.Size = NumberSequence.new(0.5, 0)
+          em.Lifetime = NumberRange.new(0.4, 1)
+        elseif ex.tipo == "fumaça" then
+          em.Color = ColorSequence.new(Color3.fromRGB(150, 150, 150))
+          em.Size = NumberSequence.new(0.8, 2.5)
+          em.Transparency = NumberSequence.new(0.5, 1)
+        elseif ex.tipo == "agua" then
+          em.Color = ColorSequence.new(Color3.fromRGB(120, 190, 255))
+          em.Size = NumberSequence.new(0.2, 0.4)
+        elseif ex.tipo == "neve" then
+          em.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
+          em.Size = NumberSequence.new(0.08, 0.15)
+          em.Speed = NumberRange.new(0.3, 0.8)
+        else
+          em.Color = ColorSequence.new(col or Color3.fromRGB(255, 230, 150))
+          em.Size = NumberSequence.new(0.15, 0.02)
+        end
+        em.Parent = pp
+      elseif ex.type == "beam" then
+        local a1 = Instance.new("Part")
+        a1.Size = Vector3.new(0.1, 0.1, 0.1)
+        a1.Position = Vector3.new(ex.from.x, ex.from.y, ex.from.z)
+        a1.Anchored = true; a1.CanCollide = false; a1.Transparency = 1
+        a1.Parent = model
+        local a2 = Instance.new("Part")
+        a2.Size = Vector3.new(0.1, 0.1, 0.1)
+        a2.Position = Vector3.new(ex.to.x, ex.to.y, ex.to.z)
+        a2.Anchored = true; a2.CanCollide = false; a2.Transparency = 1
+        a2.Parent = model
+        local at1 = Instance.new("Attachment", a1)
+        local at2 = Instance.new("Attachment", a2)
+        local beam = Instance.new("Beam")
+        beam.Attachment0 = at1
+        beam.Attachment1 = at2
+        beam.Width0 = ex.w or 0.15
+        beam.Width1 = ex.w or 0.15
+        local col = makeColor(ex.cor)
+        if col then beam.Color = ColorSequence.new(col) end
+        beam.FaceCamera = false
+        beam.Parent = a1
+      elseif ex.type == "placa" then
+        local bb = Instance.new("BillboardGui")
+        bb.Size = UDim2.fromScale(0, 0)
+        bb.StudsOffset = Vector3.new(0, 0.4, 0)
+        bb.AlwaysOnTop = false
+        local frame = Instance.new("Frame")
+        frame.Size = UDim2.fromOffset(math.floor(ex.w * 12), math.floor(ex.h * 12))
+        frame.BackgroundColor3 = Color3.fromRGB(30, 34, 44)
+        frame.Parent = bb
+        local txt = Instance.new("TextLabel")
+        txt.Size = UDim2.fromScale(1, 1)
+        txt.BackgroundTransparency = 1
+        txt.Text = ex.text or ""
+        txt.TextColor3 = Color3.fromRGB(240, 240, 245)
+        txt.TextScaled = true
+        txt.Font = Enum.Font.GothamBold
+        txt.Parent = frame
+        local holder = Instance.new("Part")
+        holder.Size = Vector3.new(0.2, 0.2, 0.2)
+        holder.Position = Vector3.new(ex.pos.x, ex.pos.y, ex.pos.z)
+        holder.Anchored = true; holder.CanCollide = false; holder.Transparency = 1
+        holder.Parent = model
+        bb.Parent = holder
+      elseif ex.type == "tela" then
+        local tp = Instance.new("Part")
+        tp.Size = Vector3.new(ex.w, ex.h, 0.2)
+        tp.Position = Vector3.new(ex.pos.x, ex.pos.y, ex.pos.z)
+        tp.CFrame = CFrame.new(0, 0, 0) * CFrame.Angles(0, ex.rotY or 0, 0)
+        tp.CFrame = tp.CFrame * CFrame.new(ex.pos.x - tp.CFrame.Position.X, ex.pos.y - tp.CFrame.Position.Y, ex.pos.z - tp.CFrame.Position.Z)
+        tp.Anchored = true
+        tp.Material = Enum.Material.BlackPlastic
+        tp.Parent = model
+        local col = makeColor(ex.cor)
+        if col then tp.Color = col end
+        local sg = Instance.new("SurfaceGui")
+        sg.Size = Vector2.new(ex.w, ex.h)
+        sg.Face = Enum.NormalId.Front
+        sg.Parent = tp
+        local f = Instance.new("Frame", sg)
+        f.Size = UDim2.fromScale(1, 1)
+        f.BackgroundColor3 = col or Color3.fromRGB(32, 36, 44)
+      elseif ex.type == "decal" then
+        local dp = Instance.new("Part")
+        dp.Size = Vector3.new(ex.w, ex.h, 0.1)
+        dp.Position = Vector3.new(ex.pos.x, ex.pos.y, ex.pos.z)
+        dp.CFrame = dp.CFrame * CFrame.Angles(0, ex.rotY or 0, 0)
+        dp.Anchored = true; dp.CanCollide = false
+        dp.Material = Enum.Material.SmoothPlastic
+        dp.Parent = model
+        local dc = Instance.new("Decal")
+        dc.Face = Enum.NormalId.Front
+        dc.Transparency = 1 - (ex.opacidade or 0.8)
+        if ex.asset and ex.asset ~= "" then dc.Texture = ex.asset end
+        dc.Parent = dp
+      end
+    end)
+  end
+
+  -- 5) mood (Lighting)
+  if specs.mood and specs.mood.luz then
+    pcall(function()
+      local L = game:GetService("Lighting")
+      local Luz = specs.mood.luz:lower()
+      if Luz == "noite" or Luz == "notte" then
+        L.ClockTime = 22
+        local atm = L:FindFirstChildOfClass("Atmosphere") or Instance.new("Atmosphere", L)
+        atm.Density = 0.4; atm.Glare = 0.3; atm.Haze = 4
+      elseif Luz == "entardecer" or Luz == "por_do_sol" then
+        L.ClockTime = 18
+        local atm = L:FindFirstChildOfClass("Atmosphere") or Instance.new("Atmosphere", L)
+        atm.Density = 0.5; atm.Glare = 0.6; atm.Haze = 6
+      elseif Luz == "neblina" or Luz == "chuva" then
+        L.ClockTime = 12
+        local atm = L:FindFirstChildOfClass("Atmosphere") or Instance.new("Atmosphere", L)
+        atm.Density = 0.9; atm.Haze = 10
+      else
+        L.ClockTime = 14
+      end
+      if specs.mood.bloom and tonumber(specs.mood.bloom) > 0 then
+        local b = L:FindFirstChildOfClass("Bloom") or Instance.new("Bloom", L)
+        b.Intensity = clamp(tonumber(specs.mood.bloom) or 0.3, 0, 1)
+      end
+    end)
+  end
+
+  model.Parent = parent or WS
+  prog(("pronto: %d parts, %d meshes fundidos, %d tris em mesh"):format(stats.parts, stats.merged, stats.tris))
+  return model, stats
+end
+
+-- ============================================================
+-- PROMPTS (v2)
+-- ============================================================
+local DSL = [[
+FORMATO (JSON único, sem texto fora dele):
+{ "ops": [ ... ] }   (opcional: "mood": {...} só na etapa final)
+
+OPERAÇÕES (a IA escolhe; o CÓDIGO faz a matemática — NUNCA liste centenas de coordenadas à mão):
+- box:      {t:"box", pos:[x,y,z], size:[lx,lt,lz], rotY:0 (graus), mat:"madeira", cor:"#a06030", g:"grupo?"}
+- cyl:      {t:"cyl", pos:[x,y,z], r:2, h:4, segs:20, mat, cor, g}
+- arc:      {t:"arc", center:[x,y,z], r:6, y:0, h:2, w:0.8, a0:0, a1:180, segs:32, mat, cor, g}   (muralha/colunata em curva)
+- ring:     {t:"ring", center:[x,y,z], r0:4, r1:7, h:0.3, segs:48, mat, cor, g}                    (largo circular: pátio, lago)
+- dome:     {t:"dome", center:[x,y,z], r:5, u:20, v:9, mat, cor, g}                                (cúpola — mesh liso real)
+- sphere:   {t:"sphere", center:[x,y,z], r:2, u:14, v:8, mat, cor, g}
+- lathe:    {t:"lathe", center:[x,y,z], profile:[[r,y],...], segs:24, mat, cor, g}  (perfil de baixo p/ cima: torre, vaso, poço)
+- sweep:    {t:"sweep", pts:[[x,y,z],...], w:1, h:2, corte:"rect"|"circle", seg:6, mat, cor, g}    (tubo, caminho, muro curvo, corda — passa pelos pts)
+- stair:    {t:"stair", from:[x,y,z], to:[x,y,z], w:2, steps:10, mat, cor}
+- wall:     {t:"wall", from:[x,y,z], to:[x,y,z], h:3, thick:0.5, mat:"tijolo", cor, openings:[{pos:0..1, w:1.6, h:2.2, tipo:"porta"|"janela"}]}  (parede COM ABERTURAS REAIS; thick=espessura)
+- roof:     {t:"roof", a:[x,y,z], b:[x,y,z], pitch:0.5, w:8, rows:6, mat, cor}   (telhado 2 águas, cumeeira a→b)
+- column:   {t:"column", pos:[x,y,z], r:0.4, h:4, mat:"marmore", cor}
+- window:   {t:"window", pos:[x,y,z], w:1.5, h:2, rot:0 (graus), mat, g}
+- door:     {t:"door", pos:[x,y,z], w:1.7, h:3, rot:0 (graus), mat, cor}
+- fence:    {t:"fence", from:[x,y,z], to:[x,y,z], h:1.2, rails:3, mat, cor}
+- tree:     {t:"tree", pos:[x,y,z], h:8, tipo:"redondo"|"palm"|"pine", mat, cor}
+- rock:     {t:"rock", pos:[x,y,z], s:2, n:6, mat:"pedra", cor}
+- mesh:     {t:"mesh", pos:[x,y,z], verts:[[x,y,z],...], tris:[[i,j,k],...], mat, cor}  (SÓ para formas impossíveis; vértices locais)
+
+DETALHES FINAIS (etapa decor; não contam no orçamento):
+- light:    {t:"light", pos:[x,y,z], tipo:"point"|"spot"|"surface", cor:"#ffd27f", int:2, range:14}
+- particle: {t:"particle", pos:[x,y,z], tipo:"fogo"|"fumaça"|"agua"|"neve"|"brilho", dir:[0,1,0], size, rate}
+- beam:     {t:"beam", from:[x,y,z], to:[x,y,z], cor:"#00ffee", w:0.15}   (cabos, luz de neon, cordas brilhantes)
+- placa:    {t:"placa", pos:[x,y,z], text:"CAFÉ", w:3, h:1, rot:0}        (letreiro)
+- tela:     {t:"tela", pos:[x,y,z], w:4, h:2.5, rot:0, cor:"#20242c"}    (TV/monitor/painel)
+- decal:    {t:"decal", pos:[x,y,z], rot:0 (graus), w:2, h:2, asset:"rbxassetid://...", opacidade:0.8}
+- mood:     {t:"mood", luz:"dia"|"entardecer"|"noite"|"neblina", bloom:0.3}
+
+REGRAS DE OURO:
+1. Coordenadas: o modelo nasce no ORIGEM (0,0,0), +Y é cima, chão em y=0, eixo +Z é "frente". Tudo centralizado em torno de x=0,z=0.
+2. CURVAS E SUPERFÍCIES: use arc/dome/lathe/sweep/ring — o código calcula os pontos. NUNCA aproxime um círculo com 20 boxes manuais.
+3. GRUPOS "g": toda peça que forma o MESMO SÓLIDO liso (parede curva, cúpola, torre) leva o MESMO g:"nome" — o motor FUNDE num mesh real. Peças separadas: g diferente ou sem g.
+4. ORÇAMENTO: use no máximo N parts no total (1 arc com segs:32 ≈ 32 parts; 1 dome u:20 v:9 ≈ 150 parts; 1 lathe ≈ segs×perfis).
+5. DETALHE: capricha em porta com maçaneta, janela com moldura, telhado por fileiras, colunas, muretas, árvores variadas, rochas. Interior visível (pisos, escada, mobília) quando for prédio.
+6. MATERIALS (pt-br): madeira, pedra, tijolo, concreto, metal, marmore, plastico, neon, grama, vidro, agua, areia, gelo.
+7. Responda SOMENTE com o JSON.
+]]
+
+-- resumo compacto do que já foi desenhado (dado às próximas seções
+-- p/ elas continuarem nas coordenadas certas, sem sobrepor)
+function R3D2.summarize(ops)
+  local lines = {}
+  for i, op in ipairs(ops or {}) do
+    if #lines >= 50 then break end
+    local p = op.center or op.pos or op.from or op.a or (op.pts and op.pts[1]) or { 0, 0, 0 }
+    lines[#lines + 1] = string.format("%d) %s p=(%.1f,%.1f,%.1f)",
+      i, tostring(op.t or op.tipo or "?"), p[1] or 0, p[2] or 0, p[3] or 0)
+  end
+  if ops and #ops > 50 then
+    lines[#lines + 1] = string.format("(%d ops a mais…)", #ops - 50)
+  end
+  return table.concat(lines, "\n")
+end
+
+function R3D2.promptsPlan(prompt, cap)
+  return ("Você é um arquiteto 3D sênior do Roblox. Crie o PLANO de construção do pedido: \"%s\".\n"
+    .. "Retorne SOMENTE JSON: {\"nome\":\"...\", \"estilo\":\"...\", \"mood\":\"dia|entardecer|noite|neblina\", "
+    .. "\"secoes\":[{\"t\":\"título curto\",\"orc\":orcamento_em_parts,\"nota\":\"o que construir nesta seção, com detalhes\"}]}\n"
+    .. "Divida em 2 a 5 secoes (fundação/estrutura → telhado/curvas → mobiliário/detalhes → paisagem/acabamento).\n"
+    .. "Soma dos orçamentos ≤ %d. Seções de curvas/cúpolas gastam mais (use dome/lathe/arc/sweep).\n"
+    .. "Pense em: formas, materiais, paleta de cores, luz, atmosfera."):format(prompt, cap)
+end
+
+function R3D2.promptsSection(plan, i, sec, budget, builtSummary, capInfo)
+  return ("Você está construindo a SEÇÃO " .. i .. " (" .. tostring(sec.t) .. ") do modelo \"" .. tostring(plan.nome) .. "\".\n"
+    .. "Plano da seção: " .. tostring(sec.nota) .. "\n"
+    .. (builtSummary ~= "" and ("JÁ CONSTRUÍDO (coordenadas reais para você continuar sem sobrepor):\n" .. builtSummary .. "\n") or "")
+    .. "Orçamento desta seção: " .. budget .. " parts (máximo). " .. capInfo .. "\n"
+    .. "REGRAS DE OURO:\n" .. DSL .. "\n"
+    .. "Retorne SOMENTE JSON: {\"ops\":[ ... ]} com a seção " .. i .. ". Peças de curva/superfície lisa: mesmo g.\"Grupo\" + a op de curva.\n"
+    .. "Posicione tudo em coordenadas globais consistentes com o que já foi construído.")
+end
+
+function R3D2.promptsDecor(plan, builtSummary)
+  return ("DETALHAMENTO FINAL do modelo \"" .. tostring(plan.nome) .. "\" (estilo: " .. tostring(plan.estilo or "?") .. ").\n"
+    .. "Só adicione extras de acabamento (luzes, partículas, feixes/neon, letreiros, telas, decals, mood) — NENHUMA parte de estrutura.\n"
+    .. "No máximo 35 extras. Posições coerentes: luzes em varandas/janelas, fogo em lareira/churrasqueira, fumaça em chaminé, neon em fachada, letreiro no topo.\n"
+    .. (builtSummary ~= "" and ("Contexto do que existe:\n" .. builtSummary .. "\n") or "")
+    .. "OPERAÇÕES de detalhe:\n"
+    .. "- light:    {t:\"light\", pos:[x,y,z], tipo:\"point\"|\"spot\"|\"surface\", cor:\"#ffd27f\", int:2, range:14}\n"
+    .. "- particle: {t:\"particle\", pos:[x,y,z], tipo:\"fogo\"|\"fumaça\"|\"agua\"|\"neve\"|\"brilho\", dir:[0,1,0], rate:8}\n"
+    .. "- beam:     {t:\"beam\", from:[x,y,z], to:[x,y,z], cor:\"#00ffee\", w:0.15}  (cabos, neon, cordas)\n"
+    .. "- placa:    {t:\"placa\", pos:[x,y,z], text:\"CAFÉ\", w:3, h:1, rot:0 (graus)}  (letreiro)\n"
+    .. "- tela:     {t:\"tela\", pos:[x,y,z], w:4, h:2.5, rot:0 (graus), cor:\"#20242c\"}  (TV/painel)\n"
+    .. "- decal:    {t:\"decal\", pos:[x,y,z], rot:0, w:2, h:2, asset:\"rbxassetid://...\"}\n"
+    .. "- mood:     {t:\"mood\", luz:\"dia\"|\"entardecer\"|\"noite\"|\"neblina\", bloom:0.3}\n"
+    .. "RETORNE SOMENTE JSON: {\"extras\":[ ... ], \"mood\":{...}}")
+end
+
+return R3D2
+end)()
+
+local CAPS = R3D2.probe()
+local BUDGET = 3000  -- limite de parts por modelo
 
 -- ============================================================
 -- IA DIRETO NO SCRIPT (OpenAI-compatible: Puter, OpenRouter, Groq...)
@@ -81,33 +1644,9 @@ local function saveCfg(cfg)
     end)
 end
 
-local SYSTEM_PROMPT = [==[Você é um modelador 3D especialista em Roblox (estilo low-poly DETALHADO e realista).
-Você recebe um pedido em português e responde APENAS com JSON válido — sem markdown, sem texto antes/depois.
+-- Os prompts completos por etapa vêm do motor: R3D2.promptsPlan / promptsSection / promptsDecor
+local SYSTEM_PROMPT = "Você é um modelador 3D especialista em Roblox (estilo low-poly DETALHADO e realista). Responda SEMPRE SOMENTE com JSON válido — sem markdown, sem texto antes ou depois."
 
-UNIDADES: 1 stud ≈ 0,28 m. Avatar Roblox ≈ 5 studs de altura. Eixos: Y para cima, chão em y=0, frente para -Z.
-
-ESQUEMA EXATO da resposta:
-{"name":"nome_curto_ascii","parts":[["box",[largura,altura,profundidade],[x,y,z],[rx,ry,rz],"material","#RRGGBB","NomePart"],["cylinder",[raio,altura],[x,y,z],[rx,ry,rz],"material","#RRGGBB","Nome"],["sphere",[raio],[x,y,z],[rx,ry,rz],"material","#RRGGBB","Nome"]]}
-
-REGRAS:
-- kind: "box" | "cylinder" (size=[raio,altura]) | "sphere" (size=[raio] ou [rx,ry,rz]).
-- rot em graus. MÁXIMO 300 parts (priorize o essencial; resposta longa demora).
-- material: APENAS uma destas chaves: madeira, pedra, marmore, tijolo, terra, palha, metal, metal_escuro, dourado, prata, couro, lona, vidro, folha, grama, areia, agua, neon, plastico, basalto, gelo.
-- name: ASCII curto (sem acento/espaço).
-
-GUIA DE ESTILO (obrigatório):
-- DETALHE é o que diferencia: paredes construídas em SEGMENTOS separados deixando ABERTURAS de porta (1.6 largura, 2.8 altura) e janelas (1x1). Prédios com interior ENTRÁVEL precisam de piso, teto (peça de 0.2 de espessura, pé-direito mínimo 3.4) e MOBÍLIA dentro (mesa, banco, cama, prateleira, fogão, etc).
-- Tudo apoiado no chão (y=0) ou em outra peça — nada flutuando.
-- Variações de tom (hex próximos) pra textura não virar "pintura".
-- Escadas: degraus de 0.4 de altura.
-- Referências de escala reais:
-  * capivara: ~3.8 studs de comprimento, 1.9 nas costas, cabeça comprida com focinho largo e olhos pequenos, orelhas mínimas, patas curtas grossas;
-  * armadura medieval completa: cavaleiro ~5.6 studs (elmo, gola, ombreiras, braçadeiras, peitoral, costela, cotovelos, joelheiras, grevas, coturnos, cota de malha, escudo com brasão, espada no cinto);
-  * cabana primitiva: ~7x5.5x3.8, troncos cruzados (cilindros), teto de palha inclinado (boxes rotacionados), entrada aberta, fogueira central (anel de pedras + chama "neon" laranja/vermelha), pilha de caça, ferramentas na parede, tochas;
-  * favela: quarteirão ~30x30 em colina, 8-10 casas de 2-3 andares coloridas (cada andar um box com boxes de janela/porta), tanques de água (cilindros azul "agua") e antenas nos telhados, escadaria de pedra, rua com mercado (barracas com toldo "lona"), postes com fiação, lixo e plantas.
-- "realista" = proporções corretas + muito detalhe + cores sóbrias (não cartoon).
-
-Responda SOMENTE o JSON.]==]
 
 local function findLast(s, sub)
     local last, pos = nil, 1
@@ -139,83 +1678,12 @@ local function extractJson(text)
     return data
 end
 
-local VALID_TEX = {madeira = true, pedra = true, marmore = true, tijolo = true,
-    terra = true, palha = true, metal = true, metal_escuro = true, dourado = true,
-    prata = true, couro = true, lona = true, vidro = true, folha = true,
-    grama = true, areia = true, agua = true, neon = true, plastico = true,
-    basalto = true, gelo = true}
-local VALID_KIND = {box = true, cylinder = true, sphere = true}
-
-local function hexToRgb(h)
-    h = h:gsub("^#", ""):lower()
-    if #h == 3 then
-        h = h:sub(1, 1) .. h:sub(1, 1) .. h:sub(2, 2) .. h:sub(2, 2) .. h:sub(3, 3) .. h:sub(3, 3)
-    end
-    return tonumber(h:sub(1, 2), 16) or 255,
-        tonumber(h:sub(3, 4), 16) or 255,
-        tonumber(h:sub(5, 6), 16) or 255
+local function scene2v2(data)
+    -- converte a resposta da IA (ops v2 ou partes[] legacy v1) em specs construíveis
+    local out, err = R3D2.expandOps(data, { budget = BUDGET, emOk = CAPS.emesh })
+    if not out then return nil, err end
+    return out
 end
-
-local function clamp255(v) return math.min(255, math.max(0, v)) end
-
-local function normalizeScene(data)
-    local name = tostring(data.name or "modelo"):gsub("[^%a%d_]+", "_"):sub(1, 40)
-    if name == "" then name = "modelo" end
-    local parts = {}
-    local raw = data.parts or {}
-    local maxParts = 300
-    for i = 1, math.min(#raw, maxParts) do
-        local p = raw[i]
-        if type(p) == "table" and #p >= 6 and type(p[2]) == "table" and type(p[3]) == "table" then
-            local kind = tostring(p[1]):lower()
-            if VALID_KIND[kind] then
-                local rawSize = p[2]
-                local size = {}
-                -- box precisa de 3 dimensões; cylinder de 2 (raio, altura); sphere de 1+
-                local need = (kind == "box") and 3 or ((kind == "cylinder") and 2 or 1)
-                local okSize = #rawSize >= need
-                for i = 1, 3 do
-                    local v = rawSize[i]
-                    if v ~= nil then
-                        if type(v) ~= "number" or v <= 0.01 or v > 300 then
-                            okSize = false
-                            break
-                        end
-                        size[i] = v
-                    end
-                end
-                if okSize then
-                    if kind == "cylinder" then size[4] = 24 end
-                    local pos = {p[3][1] or 0, p[3][2] or 0, p[3][3] or 0}
-                    local okPos = true
-                    for _, v in ipairs(pos) do
-                        if type(v) ~= "number" or math.abs(v) > 400 then okPos = false break end
-                    end
-                    if okPos then
-                        local rotSrc = (#p > 3 and type(p[4]) == "table") and p[4] or {0, 0, 0}
-                        local rot = {rotSrc[1] or 0, rotSrc[2] or 0, rotSrc[3] or 0}
-                        local mat = tostring(p[5] or "plastico"):lower():gsub("-", "_")
-                        if not VALID_TEX[mat] then mat = "plastico" end
-                        local color = p[6]
-                        local rgb
-                        if type(color) == "string" then
-                            rgb = {hexToRgb(color)}
-                        elseif type(color) == "table" then
-                            rgb = {clamp255(color[1] or 200), clamp255(color[2] or 200), clamp255(color[3] or 200)}
-                        else
-                            rgb = {200, 200, 200}
-                        end
-                        local nm = tostring(#p > 6 and p[7] or ("Part" .. (#parts + 1))):gsub("[^%a%d_]+", "_"):sub(1, 24)
-                        if nm == "" then nm = "Part" .. (#parts + 1) end
-                        table.insert(parts, {kind, size, pos, rot, mat, rgb, nm})
-                    end
-                end
-            end
-        end
-    end
-    return {name = name, parts = parts}
-end
-
 local function callLLM(cfg, prompt, maxTokens)
     local req = {
         Url = cfg.base .. "/chat/completions",
@@ -229,8 +1697,8 @@ local function callLLM(cfg, prompt, maxTokens)
             temperature = 0.4,
             max_tokens = maxTokens or 8192,
             messages = {
-                {role = "system", content = SYSTEM_PROMPT},
-                {role = "user", content = prompt},
+                {role = "system", content = systemPrompt or SYSTEM_PROMPT},
+                {role = "user", content = userPrompt},
             },
         }),
     }
@@ -259,7 +1727,7 @@ local function callLLM(cfg, prompt, maxTokens)
 end
 
 local function validateLLM(cfg)
-    local ok, err = callLLM(cfg, "ok", 5)
+    local ok, err = callLLM(cfg, SYSTEM_PROMPT, "ok", 5)
     if ok then return true end
     return false, err
 end
@@ -508,50 +1976,60 @@ end
 -- ============================================================
 local building = false
 
-local function buildScene(scene, atPosition, status)
-    local model = Instance.new("Model")
-    model.Name = "Roblox3D_" .. tostring(scene.name or "modelo")
-    model:SetAttribute("Roblox3D", true)
-    local parts = scene.parts or {}
-    local total = #parts
-    local made = 0
-    local firstPart = nil
-    for i = 1, total do
-        local s = parts[i]
-        local part
-        if s[1] == "box" then
-            part = Instance.new("Part")
-            part.Size = Vector3.new(s[2][1], s[2][2], s[2][3])
-        elseif s[1] == "cylinder" then
-            part = Instance.new("MeshPart")
-            part.MeshId = "rbxasset://Meshes/cylinder_main"
-            part.Size = Vector3.new(s[2][1] * 2, s[2][2], s[2][1] * 2)
-        else
-            part = Instance.new("MeshPart")
-            part.MeshId = "rbxasset://Meshes/ball_main"
-            part.Size = Vector3.new(s[2][1] * 2, (s[2][2] or s[2][1]) * 2, (s[2][3] or s[2][1]) * 2)
-        end
-        part.Name = s[7] or ("Part" .. i)
-        part.Anchored = true
-        part.CFrame = CFrame.new(s[3][1], s[3][2], s[3][3])
-            * CFrame.fromEulerAnglesXYZ(math.rad(s[4][1]), math.rad(s[4][2]), math.rad(s[4][3]))
-        applyLook(part, s[5], s[6])
-        part.Parent = model
-        if not firstPart then firstPart = part end
-        made = made + 1
-        if made % 25 == 0 or made == total then
-            status(string.format("construindo… %d/%d", made, total))
-        end
-        if made % 40 == 0 then task.wait() end
+local MAT_TO_TEX = {
+    [Enum.Material.Wood] = "madeira",
+    [Enum.Material.Slate] = "pedra", [Enum.Material.Granite] = "pedra",
+    [Enum.Material.Concrete] = "pedra", [Enum.Material.Basalt] = "basalto",
+    [Enum.Material.Brick] = "tijolo",
+    [Enum.Material.Marble] = "marmore",
+    [Enum.Material.Metal] = "metal", [Enum.Material.CorrodedMetal] = "metal_escuro",
+    [Enum.Material.Gold] = "dourado", [Enum.Material.Silver] = "prata",
+    [Enum.Material.Grass] = "grama", [Enum.Material.Sand] = "areia",
+    [Enum.Material.Foliage] = "folha", [Enum.Material.Fabric] = "lona",
+    [Enum.Material.Leather] = "couro", [Enum.Material.Ice] = "gelo",
+    [Enum.Material.Water] = "agua",
+}
+
+-- pós-pass: texturas PBR procedurais (o diferencial visual) por cima
+-- das parts/meshes que o motor R3D2 criou. Vidro/neon/plástico ficam puros.
+local function postTextures(model, status)
+    local total = 0
+    for _, inst in ipairs(model:GetDescendants()) do
+        if inst:IsA("BasePart") then total = total + 1 end
     end
-    model.PrimaryPart = firstPart
+    local done = 0
+    for _, inst in ipairs(model:GetDescendants()) do
+        if inst:IsA("BasePart") then
+            local key = MAT_TO_TEX[inst.Material]
+            if key then
+                local r, g, b = inst.Color:ToRGB()
+                applyLook(inst, key, {r, g, b})
+            end
+            done = done + 1
+            if done % 60 == 0 or done == total then
+                status(string.format("texturizando… %d/%d", done, total))
+                task.wait()
+            end
+        end
+    end
+end
+
+-- build v2: specs do expandOps → R3D2.build (parts + meshes reais +
+-- fusão booleana + extras + mood) → texturas PBR → posiciona na frente
+local function buildScene(specs, atPosition, status)
+    local name = tostring(specs.name or "modelo"):gsub("[^%a%d_]+", "_"):sub(1, 40)
+    if name == "" then name = "modelo" end
+    local model, stats = R3D2.build(specs, workspace, { capabilities = CAPS, nome = "Roblox3D_" .. name }, status)
+    if not model then return nil, nil end
+    model:SetAttribute("Roblox3D", true)
+    local first = model:FindFirstChildWhichIsA("BasePart")
+    if first then pcall(function() model.PrimaryPart = first end) end
+    postTextures(model, status)
     if atPosition then
         pcall(function() model:PivotTo(atPosition) end)
     end
-    model.Parent = workspace
-    return model, made
+    return model, stats
 end
-
 local function playerAnchor()
     local player = Players.LocalPlayer
     local char = player and player.Character
@@ -603,7 +2081,7 @@ local function setupGui(player)
     toggle.Position = UDim2.new(0, 10, 0.5, -27)
     toggle.BackgroundColor3 = Color3.fromRGB(38, 42, 52)
     toggle.BackgroundTransparency = 0.15
-    toggle.Text = "🏛"
+    toggle.Text = "🛠️"
     toggle.TextSize = 26
     toggle.Font = Enum.Font.Gotham
     toggle.AutoButtonColor = true
@@ -635,7 +2113,7 @@ local function setupGui(player)
     title.Size = UDim2.new(1, -100, 1, 0)
     title.Position = UDim2.new(0, 14, 0, 0)
     title.BackgroundTransparency = 1
-    title.Text = "🤖 Roblox3D — me peça um modelo"
+    title.Text = "ARKHER 3D AI"
     title.TextColor3 = Color3.fromRGB(235, 238, 245)
     title.Font = Enum.Font.GothamMedium
     title.TextSize = 15
@@ -876,7 +2354,7 @@ local function setupGui(player)
             return
         end
         if p:find("ajuda") or p == "help" then
-            addMsg("Peça qualquer coisa: favela, capivara, armadura medieval, cabana, castelo, carro, espada, cidade…\nDicas:\n• seja específico (\"ultra detalhado\", \"tudo entrável e mobiliado\")\n• o modelo aparece NA FRENTE do seu avatar\n• botão Limpar apaga tudo\n• ⚙ (no título) troca token/modelo\n• modelos bons no puter: claude-sonnet-5, gemini-3.1-flash-lite, grok-4-1-fast", Color3.fromRGB(180, 188, 205))
+            addMsg("Peça qualquer coisa: favela, capivara, armadura medieval, cabana, castelo, carro, espada, cidade…\nDicas:\n• seja específico (\"ultra detalhado\", \"tudo entrável e mobiliado\")\n• trabalho em 3 etapas: plano → seções → decor (pode levar 1-3 min; o status mostra onde estou)\n• limite: 3000 parts por modelo\n• o modelo aparece NA FRENTE do seu avatar\n• botão Limpar apaga tudo\n• ⚙ (no título) troca token/modelo\n• modelos bons no puter: claude-sonnet-5, gemini-3.1-flash-lite, grok-4-1-fast", Color3.fromRGB(180, 188, 205))
             return
         end
 
@@ -887,37 +2365,94 @@ local function setupGui(player)
         end
 
         building = true
-        setStatus("pensando… (IA desenhando a cena)", Color3.fromRGB(250, 200, 90))
+        local Y = Color3.fromRGB(250, 200, 90)
+        local RD = Color3.fromRGB(255, 120, 120)
+        setStatus("plano… (IA arquiteta)", Y)
         task.spawn(function()
-            local okText, textOrErr = callLLM(aiCfg, text)
-            if not okText then
+            local function fail(msg)
                 building = false
                 setStatus("erro", Color3.fromRGB(255, 110, 110))
-                addMsg("❌ " .. textOrErr, Color3.fromRGB(255, 120, 120))
+                addMsg("❌ " .. tostring(msg):sub(1, 300), RD)
+            end
+            local capInfo = ("capacidades do ambiente: fusão booleana %s; EditableMesh (triângulos reais) %s.")
+                :format(CAPS.union and "ON" or "OFF", CAPS.emesh and "ON" or "OFF (curvas viram anéis de caixas orientadas)")
+
+            -- ETAPA 1: PLANO (arquiteto divide o trabalho em seções + orçamento)
+            local okP, planRaw = callLLM(aiCfg, SYSTEM_PROMPT, R3D2.promptsPlan(text, BUDGET), 8192)
+            if not okP then fail(planRaw) return end
+            local okPJ, plan = pcall(extractJson, planRaw)
+            if not okPJ or type(plan) ~= "table" then
+                fail("a IA respondeu o plano sem JSON válido — tente de novo")
                 return
             end
-            local okJ, data = pcall(extractJson, textOrErr)
-            if not okJ then
-                building = false
-                setStatus("resposta sem JSON", Color3.fromRGB(255, 110, 110))
-                addMsg("❌ a IA respondeu, mas sem JSON válido — tente de novo: " .. tostring(data):sub(1, 120), Color3.fromRGB(255, 120, 120))
+            local secs = plan.secoes or plan.sections or {}
+            if #secs == 0 then secs = { {t = "modelo", nota = text, orc = BUDGET} } end
+
+            -- ETAPA 2: SEÇÕES (a IA desenha ops; o motor calcula a geometria real)
+            local allOps = {}
+            local builtSummary = ""
+            for i, sec in ipairs(secs) do
+                local secBudget = math.floor(tonumber(sec.orc) or (BUDGET / #secs))
+                setStatus(string.format("seção %d/%d: %s", i, #secs, tostring(sec.t or "?"):sub(1, 36)), Y)
+                local okS, sRaw = callLLM(aiCfg, SYSTEM_PROMPT,
+                    R3D2.promptsSection(plan, i, sec, secBudget, builtSummary, capInfo), 8192)
+                if not okS then fail(sRaw) return end
+                local okSJ, sData = pcall(extractJson, sRaw)
+                if okSJ and type(sData) == "table" and type(sData.ops) == "table" then
+                    for _, op in ipairs(sData.ops) do allOps[#allOps + 1] = op end
+                else
+                    addMsg(string.format("⚠ seção %d/%d não devolveu ops válidas — seguindo sem ela", i, #secs), Y)
+                end
+                builtSummary = R3D2.summarize(allOps)
+            end
+
+            -- ETAPA 3: DECOR + MOOD (luzes, partículas, neon, letreiros, atmosfera)
+            setStatus("decor e atmosfera…", Y)
+            local mood = nil
+            local okD, dRaw = callLLM(aiCfg, SYSTEM_PROMPT, R3D2.promptsDecor(plan, builtSummary), 8192)
+            if okD then
+                local okDJ, dData = pcall(extractJson, dRaw)
+                if okDJ and type(dData) == "table" then
+                    if type(dData.extras) == "table" then
+                        for _, op in ipairs(dData.extras) do allOps[#allOps + 1] = op end
+                    end
+                    if type(dData.mood) == "table" then mood = dData.mood end
+                end
+            else
+                addMsg("⚠ decor falhou (segui sem luzes/efeitos): " .. tostring(dRaw):sub(1, 80), Y)
+            end
+            if not mood and type(plan.mood) == "string" and plan.mood ~= "" then
+                mood = { luz = plan.mood }
+            end
+
+            -- EXPAND + BUILD (orçamento de 3000 parts aplicado aqui)
+            local specs, eErr = R3D2.expandOps({ ops = allOps }, { budget = BUDGET, emOk = CAPS.emesh })
+            if not specs then fail("expansão falhou: " .. tostring(eErr)) return end
+            if mood then specs.mood = mood end
+            local planName = tostring(plan.nome or plan.name or "modelo")
+            local total = specs.stats.parts
+            if total < 3 then
+                fail("a IA devolveu quase nada — reenvie o pedido (ou detalhe mais).")
                 return
             end
-            local scene = normalizeScene(data)
-            if #scene.parts < 3 then
-                building = false
-                setStatus("cena vazia", Color3.fromRGB(255, 110, 110))
-                addMsg("❌ a IA respondeu pouca coisa — reenvie o pedido (ou detalhe mais).", Color3.fromRGB(255, 120, 120))
-                return
+            specs.name = planName
+            if specs.stats.truncated then
+                addMsg(string.format("⚠ pediu mais que o orçamento: cortado em %d parts (máx. %d).", total, BUDGET), Y)
             end
             local pos, yaw = playerAnchor()
-            setStatus("construindo… 0/" .. #scene.parts, Color3.fromRGB(250, 200, 90))
-            local model, made = buildScene(scene, CFrame.new(pos) * CFrame.fromEulerAnglesY(math.rad(yaw)), function(t)
-                setStatus(t, Color3.fromRGB(250, 200, 90))
+            setStatus("construindo… 0/" .. total, Y)
+            local model, stats = buildScene(specs, CFrame.new(pos) * CFrame.fromEulerAnglesY(math.rad(yaw)), function(t)
+                setStatus(t, Y)
             end)
             building = false
+            if not model or not stats then fail("falha ao construir no Roblox — tente de novo") return end
             setStatus("pronto", Color3.fromRGB(120, 200, 140))
-            addMsg(string.format("✅ %s construído com %d parts! Está NA FRENTE do seu avatar — aproxime e entre. No Explorer: Workspace > %s (organize à vontade).", scene.name, made, model.Name), Color3.fromRGB(140, 230, 170))
+            local extra = ""
+            if stats.merged > 0 or stats.tris > 0 then
+                extra = string.format(" (%d fundições booleanas, %d tris em mesh real)", stats.merged, stats.tris)
+            end
+            addMsg(string.format("✅ %s construído: %d parts%s! Está NA FRENTE do seu avatar — aproxime e entre. No Explorer: Workspace > %s (organize à vontade).",
+                planName, stats.parts, extra, model.Name), Color3.fromRGB(140, 230, 170))
         end)
     end
     refs.send = send
@@ -989,7 +2524,7 @@ local function setupGui(player)
         end
     end)
 
-    local function toggle()
+    local function openToggle()
         uiState.open = not uiState.open
         panel.Visible = uiState.open
         if uiState.open then
@@ -1092,7 +2627,7 @@ local function setupGui(player)
         if wasDrag then
             persistPos(toggle.Position)
         else
-            toggle()
+            openToggle()
         end
     end)
 
@@ -1102,7 +2637,8 @@ local function setupGui(player)
     end)
 
     -- boas-vindas
-    addMsg("👋 Fala! Sou o Roblox3D — IA DIRETO no script, sem PC. Toque no 🏛 pra abrir/fechar e ARRASTE ele pra um canto vazio da tela.", Color3.fromRGB(200, 208, 225))
+    addMsg("👋 Fala! Sou o Arkher3D — IA DIRETO no script, sem PC. Toque no 🏛 pra abrir/fechar e ARRASTE ele pra um canto vazio da tela.", Color3.fromRGB(200, 208, 225))
+    addMsg("Motor novo: até 3000 parts, curvas perfeitas (cúpulas/torres/arco), fusão de peças em mesh real, portas e janelas de verdade. Trabalho em 3 etapas (plano→seções→decor) — demora um pouco mais, fica muito mais detalhado.", Color3.fromRGB(170, 178, 195))
     addMsg("Ex.: \"favela brasileira realista, tudo entrável e mobiliado\", \"capivara realista\", \"armadura medieval completa\", \"cabana de caçador primitivo\"…", Color3.fromRGB(170, 178, 195))
     refreshStatus()
 end
@@ -1123,5 +2659,6 @@ for _, player in ipairs(Players:GetPlayers()) do
 end
 
 texAPI = probeTextureAPI()
-print("[Roblox3D] AllInOne carregado. texturas: " .. (texAPI and "PBR ativas" or "modo material puro"))
+print("[Roblox3D] AllInOne v2 carregado (motor R3D2 " .. tostring(R3D2.VERSION) .. "). texturas: " .. (texAPI and "PBR ativas" or "modo material puro")
+    .. " | fusao: " .. (CAPS.union and "ON" or "OFF") .. " | emesh: " .. (CAPS.emesh and "ON" or "OFF") .. " | orcamento: " .. BUDGET .. " parts")
 print("[Roblox3D] IA: " .. (aiCfg.key ~= "" and ("ativa (" .. aiCfg.model .. ")") or "desativada — ative pelo ⚙ do painel (token Puter grátis)"))
