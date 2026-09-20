@@ -1962,15 +1962,10 @@ local TEX_DEFS = {
     pedra        = {style = "stone",  base = {164, 160, 150},  s = 10},
     marmore      = {style = "marble", base = {238, 235, 228},  s = 50},
     tijolo       = {style = "brick",  base = {152, 96, 76},    s = 40},
-    terra        = {style = "earth",  base = {140, 100, 62},   s = 12},
-    palha        = {style = "thatch", base = {196, 168, 96},   s = 33},
     metal        = {style = "metal",  base = {148, 154, 162},  s = 70},
     metal_escuro = {style = "metal",  base = {92, 95, 102},    s = 100},
-    dourado      = {style = "metal",  base = {204, 164, 66},   s = 80},
-    prata        = {style = "metal",  base = {196, 200, 206},  s = 90},
     couro        = {style = "leather", base = {120, 80, 50},   s = 170},
     lona         = {style = "fabric", base = {176, 168, 140},  s = 160},
-    folha        = {style = "grass",  base = {70, 100, 48},    s = 140},
     grama        = {style = "grass",  base = {102, 132, 62},   s = 120},
     areia        = {style = "sand",   base = {198, 180, 142},  s = 130},
     agua         = {style = "water",  base = {54, 116, 158},   s = 150},
@@ -1984,9 +1979,9 @@ local TEX_STYLE_KEY = {
 local MAT_PURE = {vidro = "Glass", neon = "Neon", plastico = "SmoothPlastic"}
 local MAT_FALLBACK = {
     pedra = "Granite", terra = "Granite", palha = "Brick", tijolo = "Brick",
-    marmore = "Marble", basalto = "Basalt", metal = "Metal", dourado = "Gold",
-    prata = "Silver", metal_escuro = "CorrodedMetal", madeira = "Wood",
-    grama = "Grass", areia = "Sand", folha = "Foliage", lona = "Fabric",
+    marmore = "Marble", basalto = "Basalt", metal = "Metal",
+    metal_escuro = "CorrodedMetal", madeira = "Wood",
+    grama = "Grass", areia = "Sand", lona = "Fabric",
     couro = "Leather", agua = "SmoothPlastic", gelo = "Ice",
 }
 
@@ -2093,14 +2088,12 @@ local building = false
 
 local MAT_TO_TEX = {
     [Enum.Material.Wood] = "madeira",
-    [Enum.Material.Slate] = "pedra", [Enum.Material.Granite] = "pedra",
     [Enum.Material.Concrete] = "pedra", [Enum.Material.Basalt] = "basalto",
     [Enum.Material.Brick] = "tijolo",
     [Enum.Material.Marble] = "marmore",
     [Enum.Material.Metal] = "metal", [Enum.Material.CorrodedMetal] = "metal_escuro",
-    [Enum.Material.Gold] = "dourado", [Enum.Material.Silver] = "prata",
     [Enum.Material.Grass] = "grama", [Enum.Material.Sand] = "areia",
-    [Enum.Material.Foliage] = "folha", [Enum.Material.Fabric] = "lona",
+    [Enum.Material.Fabric] = "lona",
     [Enum.Material.Leather] = "couro", [Enum.Material.Ice] = "gelo",
     [Enum.Material.Water] = "agua",
 }
