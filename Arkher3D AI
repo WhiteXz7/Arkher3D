@@ -1,0 +1,1127 @@
+--[[
+============================================================
+ Roblox3D · ALL-IN-ONE (tudo dentro do script, SEM PC)
+------------------------------------------------------------
+ Como usar (3 passos, só no Studio Lite):
+   1) Cole ESTE ARQUIRO INTEIRO num LocalScript:
+      aba Scripting/Scripts > "+" > LocalScript > colar > salvar
+   2) DÊ PLAY uma vez e volte pro modo edit
+   3) Toque no 🏛 (arraste-o pra um canto vazio) e ative a IA
+      UMA VEZ SÓ: botão ⚙ no título do painel
+        • conta grátis: https://puter.com
+        • token: https://puter.com/dashboard > "Create token"
+        • cole o token em "token" e toque em "Ativar IA ✅"
+      Depois é só pedir: favela, capivara, armadura medieval,
+      cabana, castelo... o modelo aparece NA FRENTE do avatar.
+
+ A IA é chamada DIRETO do script (sem server, sem PC, sem rede
+ local). O token fica guardado na experiência pra você não
+ colar de novo.
+
+ Se o seu Studio Lite bloquear HTTP externo, use a versão com
+ server (Roblox3D_Server_Standalone.py no PC).
+
+ "Limpar" apaga a cena. "Ajuda" mostra dicas.
+============================================================
+]]
+
+local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+
+-- ============================================================
+-- IA DIRETO NO SCRIPT (OpenAI-compatible: Puter, OpenRouter, Groq...)
+-- ============================================================
+local AI_STATE_NAME = "Roblox3D_AI_State"
+local AI_DEFAULTS = {
+    base = "https://api.puter.com/puterai/openai/v1",
+    key = "",
+    model = "gpt-5.4-nano",
+}
+
+local function loadCfg()
+    local cfg = {base = AI_DEFAULTS.base, key = "", model = AI_DEFAULTS.model}
+    local ok, mem = pcall(function() return _G.R3D_AI_MEM end)
+    if ok and type(mem) == "table" then
+        if mem.base and mem.base ~= "" then cfg.base = mem.base end
+        if mem.key and mem.key ~= "" then cfg.key = mem.key end
+        if mem.model and mem.model ~= "" then cfg.model = mem.model end
+    end
+    if cfg.key == "" then
+        local ok2, m = pcall(function()
+            local ms = game:GetService("ReplicatedStorage"):FindFirstChild(AI_STATE_NAME)
+            if not ms then return nil end
+            return require(ms)
+        end)
+        if ok2 and type(m) == "table" and m.key and m.key ~= "" then
+            cfg.key = m.key
+            if m.base and m.base ~= "" then cfg.base = m.base end
+            if m.model and m.model ~= "" then cfg.model = m.model end
+        end
+    end
+    cfg.base = cfg.base:gsub("/+$", "")
+    return cfg
+end
+
+local aiCfg = loadCfg()
+
+local function saveCfg(cfg)
+    aiCfg = cfg
+    pcall(function()
+        _G.R3D_AI_MEM = {base = cfg.base, key = cfg.key, model = cfg.model}
+        local rs = game:GetService("ReplicatedStorage")
+        local m = rs:FindFirstChild(AI_STATE_NAME)
+        if not m then
+            m = Instance.new("ModuleScript")
+            m.Name = AI_STATE_NAME
+            m.Parent = rs
+        end
+        m.Source = string.format("return {base = %q, key = %q, model = %q}",
+            cfg.base, cfg.key, cfg.model)
+    end)
+end
+
+local SYSTEM_PROMPT = [==[Você é um modelador 3D especialista em Roblox (estilo low-poly DETALHADO e realista).
+Você recebe um pedido em português e responde APENAS com JSON válido — sem markdown, sem texto antes/depois.
+
+UNIDADES: 1 stud ≈ 0,28 m. Avatar Roblox ≈ 5 studs de altura. Eixos: Y para cima, chão em y=0, frente para -Z.
+
+ESQUEMA EXATO da resposta:
+{"name":"nome_curto_ascii","parts":[["box",[largura,altura,profundidade],[x,y,z],[rx,ry,rz],"material","#RRGGBB","NomePart"],["cylinder",[raio,altura],[x,y,z],[rx,ry,rz],"material","#RRGGBB","Nome"],["sphere",[raio],[x,y,z],[rx,ry,rz],"material","#RRGGBB","Nome"]]}
+
+REGRAS:
+- kind: "box" | "cylinder" (size=[raio,altura]) | "sphere" (size=[raio] ou [rx,ry,rz]).
+- rot em graus. MÁXIMO 300 parts (priorize o essencial; resposta longa demora).
+- material: APENAS uma destas chaves: madeira, pedra, marmore, tijolo, terra, palha, metal, metal_escuro, dourado, prata, couro, lona, vidro, folha, grama, areia, agua, neon, plastico, basalto, gelo.
+- name: ASCII curto (sem acento/espaço).
+
+GUIA DE ESTILO (obrigatório):
+- DETALHE é o que diferencia: paredes construídas em SEGMENTOS separados deixando ABERTURAS de porta (1.6 largura, 2.8 altura) e janelas (1x1). Prédios com interior ENTRÁVEL precisam de piso, teto (peça de 0.2 de espessura, pé-direito mínimo 3.4) e MOBÍLIA dentro (mesa, banco, cama, prateleira, fogão, etc).
+- Tudo apoiado no chão (y=0) ou em outra peça — nada flutuando.
+- Variações de tom (hex próximos) pra textura não virar "pintura".
+- Escadas: degraus de 0.4 de altura.
+- Referências de escala reais:
+  * capivara: ~3.8 studs de comprimento, 1.9 nas costas, cabeça comprida com focinho largo e olhos pequenos, orelhas mínimas, patas curtas grossas;
+  * armadura medieval completa: cavaleiro ~5.6 studs (elmo, gola, ombreiras, braçadeiras, peitoral, costela, cotovelos, joelheiras, grevas, coturnos, cota de malha, escudo com brasão, espada no cinto);
+  * cabana primitiva: ~7x5.5x3.8, troncos cruzados (cilindros), teto de palha inclinado (boxes rotacionados), entrada aberta, fogueira central (anel de pedras + chama "neon" laranja/vermelha), pilha de caça, ferramentas na parede, tochas;
+  * favela: quarteirão ~30x30 em colina, 8-10 casas de 2-3 andares coloridas (cada andar um box com boxes de janela/porta), tanques de água (cilindros azul "agua") e antenas nos telhados, escadaria de pedra, rua com mercado (barracas com toldo "lona"), postes com fiação, lixo e plantas.
+- "realista" = proporções corretas + muito detalhe + cores sóbrias (não cartoon).
+
+Responda SOMENTE o JSON.]==]
+
+local function findLast(s, sub)
+    local last, pos = nil, 1
+    while true do
+        local i = s:find(sub, pos, true)
+        if not i then break end
+        last = i
+        pos = i + 1
+    end
+    return last
+end
+
+local function extractJson(text)
+    local s = text:match("^%s*(.-)%s*$")
+    if s:sub(1, 3) == "```" then
+        s = s:gsub("^%s*```[a-z]*%s*\n?", "")
+        s = s:gsub("\n?%s*```%s*$", "")
+    end
+    local first = s:find("{", 1, true)
+    local last = findLast(s, "}")
+    if not first or not last or last <= first then
+        error("JSON não encontrado na resposta do modelo")
+    end
+    local jsonStr = s:sub(first, last)
+    local ok, data = pcall(HttpService.JSONDecode, HttpService, jsonStr)
+    if not ok or type(data) ~= "table" then
+        error("JSON inválido: " .. tostring(data):sub(1, 150))
+    end
+    return data
+end
+
+local VALID_TEX = {madeira = true, pedra = true, marmore = true, tijolo = true,
+    terra = true, palha = true, metal = true, metal_escuro = true, dourado = true,
+    prata = true, couro = true, lona = true, vidro = true, folha = true,
+    grama = true, areia = true, agua = true, neon = true, plastico = true,
+    basalto = true, gelo = true}
+local VALID_KIND = {box = true, cylinder = true, sphere = true}
+
+local function hexToRgb(h)
+    h = h:gsub("^#", ""):lower()
+    if #h == 3 then
+        h = h:sub(1, 1) .. h:sub(1, 1) .. h:sub(2, 2) .. h:sub(2, 2) .. h:sub(3, 3) .. h:sub(3, 3)
+    end
+    return tonumber(h:sub(1, 2), 16) or 255,
+        tonumber(h:sub(3, 4), 16) or 255,
+        tonumber(h:sub(5, 6), 16) or 255
+end
+
+local function clamp255(v) return math.min(255, math.max(0, v)) end
+
+local function normalizeScene(data)
+    local name = tostring(data.name or "modelo"):gsub("[^%a%d_]+", "_"):sub(1, 40)
+    if name == "" then name = "modelo" end
+    local parts = {}
+    local raw = data.parts or {}
+    local maxParts = 300
+    for i = 1, math.min(#raw, maxParts) do
+        local p = raw[i]
+        if type(p) == "table" and #p >= 6 and type(p[2]) == "table" and type(p[3]) == "table" then
+            local kind = tostring(p[1]):lower()
+            if VALID_KIND[kind] then
+                local rawSize = p[2]
+                local size = {}
+                -- box precisa de 3 dimensões; cylinder de 2 (raio, altura); sphere de 1+
+                local need = (kind == "box") and 3 or ((kind == "cylinder") and 2 or 1)
+                local okSize = #rawSize >= need
+                for i = 1, 3 do
+                    local v = rawSize[i]
+                    if v ~= nil then
+                        if type(v) ~= "number" or v <= 0.01 or v > 300 then
+                            okSize = false
+                            break
+                        end
+                        size[i] = v
+                    end
+                end
+                if okSize then
+                    if kind == "cylinder" then size[4] = 24 end
+                    local pos = {p[3][1] or 0, p[3][2] or 0, p[3][3] or 0}
+                    local okPos = true
+                    for _, v in ipairs(pos) do
+                        if type(v) ~= "number" or math.abs(v) > 400 then okPos = false break end
+                    end
+                    if okPos then
+                        local rotSrc = (#p > 3 and type(p[4]) == "table") and p[4] or {0, 0, 0}
+                        local rot = {rotSrc[1] or 0, rotSrc[2] or 0, rotSrc[3] or 0}
+                        local mat = tostring(p[5] or "plastico"):lower():gsub("-", "_")
+                        if not VALID_TEX[mat] then mat = "plastico" end
+                        local color = p[6]
+                        local rgb
+                        if type(color) == "string" then
+                            rgb = {hexToRgb(color)}
+                        elseif type(color) == "table" then
+                            rgb = {clamp255(color[1] or 200), clamp255(color[2] or 200), clamp255(color[3] or 200)}
+                        else
+                            rgb = {200, 200, 200}
+                        end
+                        local nm = tostring(#p > 6 and p[7] or ("Part" .. (#parts + 1))):gsub("[^%a%d_]+", "_"):sub(1, 24)
+                        if nm == "" then nm = "Part" .. (#parts + 1) end
+                        table.insert(parts, {kind, size, pos, rot, mat, rgb, nm})
+                    end
+                end
+            end
+        end
+    end
+    return {name = name, parts = parts}
+end
+
+local function callLLM(cfg, prompt, maxTokens)
+    local req = {
+        Url = cfg.base .. "/chat/completions",
+        Method = "POST",
+        Headers = {
+            ["Content-Type"] = "application/json",
+            ["Authorization"] = "Bearer " .. cfg.key,
+        },
+        Body = HttpService:JSONEncode({
+            model = cfg.model,
+            temperature = 0.4,
+            max_tokens = maxTokens or 8192,
+            messages = {
+                {role = "system", content = SYSTEM_PROMPT},
+                {role = "user", content = prompt},
+            },
+        }),
+    }
+    local ok, resp = pcall(function() return HttpService:RequestAsync(req) end)
+    if not ok or type(resp) ~= "table" then
+        return nil, "a API não respondeu (rede bloqueada? seu Studio Lite pode bloquear HTTP externo — nesse caso use a versão com server no PC). Detalhe: " .. tostring(resp):sub(1, 120)
+    end
+    if not resp.Success then
+        local detail = tostring(resp.StatusMessage or "")
+        local okd, dd = pcall(function() return HttpService:JSONDecode(resp.Body) end)
+        if okd and type(dd) == "table" and dd.error then
+            detail = tostring(dd.error.message or dd.error)
+        end
+        return nil, "HTTP " .. tostring(resp.StatusCode) .. " — " .. detail:sub(1, 150) .. "  (verifique token/modelo/URL no ⚙)"
+    end
+    local ok2, data = pcall(function() return HttpService:JSONDecode(resp.Body) end)
+    if not ok2 or type(data) ~= "table" or not data.choices then
+        return nil, "resposta inválida da IA: " .. tostring(resp.Body):sub(1, 150)
+    end
+    local msg = data.choices[1] and data.choices[1].message
+    local text = msg and msg.content
+    if not text or #text < 10 then
+        return nil, "a IA respondeu vazio — tente de novo"
+    end
+    return text
+end
+
+local function validateLLM(cfg)
+    local ok, err = callLLM(cfg, "ok", 5)
+    if ok then return true end
+    return false, err
+end
+
+-- ============================================================
+-- SISTEMA DE TEXTURAS (100% CPU, gerado em runtime)
+-- ============================================================
+local TEX_SIZE = 128
+
+local function hash2(ix, iz, seed)
+    local h = (ix * 374761393 + iz * 668265263 + seed * 1442695041) % 2147483647
+    if h < 0 then h = h + 2147483647 end
+    return h / 2147483647
+end
+local function smoothstep(t) return t * t * (3 - 2 * t) end
+local function valueNoise(x, y, seed)
+    local ix, iy = math.floor(x), math.floor(y)
+    local fx, fy = x - ix, y - iy
+    local a = hash2(ix, iy, seed)
+    local b = hash2(ix + 1, iy, seed)
+    local c = hash2(ix, iy + 1, seed)
+    local d = hash2(ix + 1, iy + 1, seed)
+    local sx, sy = smoothstep(fx), smoothstep(fy)
+    return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy
+end
+local function fbm(x, y, seed)
+    local v, amp, freq = 0, 0.5, 1
+    for i = 1, 4 do
+        v = v + amp * valueNoise(x * freq, y * freq, seed + i * 101)
+        amp = amp * 0.5
+        freq = freq * 2
+    end
+    return v
+end
+
+local function n2(u, v, s) return fbm(u * 14, v * 14, s) end
+local function n1(u, v, s) return fbm(u * 6, v * 6, s) end
+
+local samplers = {
+    metal = function(u, v, b, s)
+        local f = (0.75 + 0.5 * (n2(u, v, s) - 0.5)) * (0.9 + 0.2 * (n1(u * 3, v, s + 7) - 0.5))
+        return b[1] * f, b[2] * f, b[3] * f
+    end,
+    stone = function(u, v, b, s)
+        local n = 0.7 + 0.6 * (n2(u, v, s) - 0.5)
+        local strata = 1 - 0.14 * math.abs(math.sin(v * math.pi * 6 + (n1(u, v, s + 3) - 0.5) * 3))
+        local crack = (n1(u * 2, v * 2, s + 11) > 0.83) and 0.75 or 1
+        local f = n * strata * crack
+        return b[1] * f, b[2] * f, b[3] * f
+    end,
+    brick = function(u, v, b, s)
+        local row = math.floor(v * 8)
+        local off = (row % 2) * 0.5
+        local lx = (u * 16 + off) % 1
+        local ly = (v * 8) % 1
+        local mortar = (ly < 0.09 or lx < 0.09) and 0.6 or 1
+        local f = (0.8 + 0.4 * (n2(u, v, s) - 0.5)) * mortar
+        return b[1] * f, b[2] * f, b[3] * f
+    end,
+    marble = function(u, v, b, s)
+        local vein = math.abs(fbm(u * 2.2 + 3.7, v * 3.4, s) - 0.5)
+        local vein2 = math.abs(fbm(u * 4.1, v * 1.7 + 8.2, s + 5) - 0.5)
+        local f = 0.94 + 0.12 * (n2(u, v, s) - 0.5)
+        if vein < 0.055 then f = f * 0.55 end
+        if vein2 < 0.05 then f = f * 0.78 end
+        return b[1] * f, b[2] * f, b[3] * f
+    end,
+    wood = function(u, v, b, s)
+        local grain = 0.75 + 0.5 * math.sin(u * 42 + fbm(u * 2, v * 6, s) * 8)
+        local f = (0.8 + 0.4 * (n2(u, v, s) - 0.5)) * grain
+        return b[1] * f, b[2] * f, b[3] * f
+    end,
+    earth = function(u, v, b, s)
+        local f = (0.7 + 0.6 * (n2(u, v, s) - 0.5)) * (0.85 + 0.3 * (n1(u, v, s + 5) - 0.5))
+        local pebble = (n1(u * 3, v * 3, s + 9) > 0.8) and 1.15 or 1
+        local g = f * pebble
+        return b[1] * g, b[2] * g, b[3] * g
+    end,
+    thatch = function(u, v, b, s)
+        local streak = 0.7 + 0.6 * (n1(u, v * 3, s) - 0.5)
+        local n = 0.8 + 0.4 * (n2(u * 2, v * 2, s + 3) - 0.5)
+        local f = streak * n
+        return b[1] * f, b[2] * f, b[3] * f
+    end,
+    grass = function(u, v, b, s)
+        local f = (0.72 + 0.55 * (n2(u, v, s) - 0.5)) * (0.85 + 0.3 * (n1(u, v, s + 4) - 0.5))
+        return b[1] * f, b[2] * f, b[3] * f
+    end,
+    sand = function(u, v, b, s)
+        local f = (0.85 + 0.3 * (n2(u, v, s) - 0.5)) * (0.9 + 0.2 * (n1(u * 3, v, s + 6) - 0.5))
+        return b[1] * f, b[2] * f, b[3] * f
+    end,
+    water = function(u, v, b, s)
+        local w = 0.8 + 0.35 * (fbm(u * 3, v * 3 + 1.3, s) - 0.5)
+        local ripple = 0.9 + 0.2 * math.sin((u + v) * 30 + fbm(u * 5, v * 5, s + 2) * 6)
+        local f = w * ripple
+        return b[1] * f, b[2] * f, b[3] * f
+    end,
+    fabric = function(u, v, b, s)
+        local f = (0.82 + 0.36 * (n2(u * 2, v * 2, s) - 0.5)) * (0.9 + 0.2 * (n1(u, v, s + 2) - 0.5))
+        return b[1] * f, b[2] * f, b[3] * f
+    end,
+    leather = function(u, v, b, s)
+        local f = (0.78 + 0.44 * (n2(u, v, s) - 0.5)) * (0.88 + 0.24 * (n1(u * 2, v * 2, s + 3) - 0.5))
+        return b[1] * f, b[2] * f, b[3] * f
+    end,
+    ice = function(u, v, b, s)
+        local vein = math.abs(fbm(u * 2.5, v * 3.2 + 5, s) - 0.5)
+        local f = 0.92 + 0.16 * (n2(u, v, s) - 0.5)
+        if vein < 0.06 then f = f * 0.72 end
+        return b[1] * f, b[2] * f, b[3] * f
+    end,
+}
+
+local TEX_DEFS = {
+    madeira      = {style = "wood",   base = {122, 84, 50},    s = 110},
+    pedra        = {style = "stone",  base = {164, 160, 150},  s = 10},
+    marmore      = {style = "marble", base = {238, 235, 228},  s = 50},
+    tijolo       = {style = "brick",  base = {152, 96, 76},    s = 40},
+    terra        = {style = "earth",  base = {140, 100, 62},   s = 12},
+    palha        = {style = "thatch", base = {196, 168, 96},   s = 33},
+    metal        = {style = "metal",  base = {148, 154, 162},  s = 70},
+    metal_escuro = {style = "metal",  base = {92, 95, 102},    s = 100},
+    dourado      = {style = "metal",  base = {204, 164, 66},   s = 80},
+    prata        = {style = "metal",  base = {196, 200, 206},  s = 90},
+    couro        = {style = "leather", base = {120, 80, 50},   s = 170},
+    lona         = {style = "fabric", base = {176, 168, 140},  s = 160},
+    folha        = {style = "grass",  base = {70, 100, 48},    s = 140},
+    grama        = {style = "grass",  base = {102, 132, 62},   s = 120},
+    areia        = {style = "sand",   base = {198, 180, 142},  s = 130},
+    agua         = {style = "water",  base = {54, 116, 158},   s = 150},
+    basalto      = {style = "stone",  base = {88, 90, 96},     s = 60},
+    gelo         = {style = "ice",    base = {176, 214, 232},  s = 180},
+}
+local TEX_STYLE_KEY = {
+    terra = "earth", palha = "thatch", marmore = "marble",
+}
+
+local MAT_PURE = {vidro = "Glass", neon = "Neon", plastico = "SmoothPlastic"}
+local MAT_FALLBACK = {
+    pedra = "Granite", terra = "Granite", palha = "Brick", tijolo = "Brick",
+    marmore = "Marble", basalto = "Basalt", metal = "Metal", dourado = "Gold",
+    prata = "Silver", metal_escuro = "CorrodedMetal", madeira = "Wood",
+    grama = "Grass", areia = "Sand", folha = "Foliage", lona = "Fabric",
+    couro = "Leather", agua = "SmoothPlastic", gelo = "Ice",
+}
+
+local texAPI = nil
+local textureCache = {}
+
+local function probeTextureAPI()
+    local okNew, t = pcall(function()
+        local c = Instance.new("CanvasTexture")
+        c.CanvasSize = Vector2.new(16, 16)
+        return c
+    end)
+    if not okNew or not t then return nil end
+    local okCtx, ctx = pcall(function() return t:GetGraphicsContext() end)
+    if not okCtx or not ctx then return nil end
+    local okSet = pcall(function() ctx:SetPixel(0, 0, Color3.new(1, 1, 1)) end)
+    if okSet then
+        return function()
+            local c = Instance.new("CanvasTexture")
+            c.CanvasSize = Vector2.new(TEX_SIZE, TEX_SIZE)
+            return c, c:GetGraphicsContext(), "setpixel"
+        end
+    end
+    local okFill = pcall(function() ctx:FillRectangle(0, 0, 1, 1, Color3.new(1, 1, 1)) end)
+    if okFill then
+        return function()
+            local c = Instance.new("CanvasTexture")
+            c.CanvasSize = Vector2.new(TEX_SIZE, TEX_SIZE)
+            return c, c:GetGraphicsContext(), "fillrect"
+        end
+    end
+    return nil
+end
+
+local function getTexture(key, def)
+    if textureCache[key] then return textureCache[key] end
+    if not texAPI then return nil end
+    local ok, canvas = pcall(function()
+        local c, ctx, mode = texAPI()
+        local styleKey = TEX_STYLE_KEY[key] or def.style
+        local sampler = samplers[styleKey]
+        local b, seed = def.base, def.s
+        for y = 0, TEX_SIZE - 1 do
+            for x = 0, TEX_SIZE - 1 do
+                local u, v = x / TEX_SIZE, y / TEX_SIZE
+                local r, g, bl = sampler(u, v, b, seed)
+                local col = Color3.new(math.clamp(r, 0, 255) / 255, math.clamp(g, 0, 255) / 255, math.clamp(bl, 0, 255) / 255)
+                if mode == "setpixel" then
+                    ctx:SetPixel(x, y, col)
+                else
+                    ctx:FillRectangle(x, y, 1, 1, col)
+                end
+            end
+            if (y % 32) == 31 then task.wait() end
+        end
+        return c
+    end)
+    if ok and canvas then textureCache[key] = canvas end
+    return textureCache[key]
+end
+
+local function safeMat(name)
+    local ok, v = pcall(function() return Enum.Material[name] end)
+    return (ok and v) or Enum.Material.SmoothPlastic
+end
+
+local function applyLook(part, texKey, rgb)
+    local col = Color3.new(rgb[1] / 255, rgb[2] / 255, rgb[3] / 255)
+    local def = TEX_DEFS[texKey]
+    local done = false
+    if def and texAPI then
+        done = pcall(function()
+            local canvas = getTexture(texKey, def)
+            if not canvas then error("sem textura") end
+            local variant = Instance.new("MaterialVariant")
+            variant.BaseColor = col
+            local mt = Instance.new("MaterialTexture")
+            mt.Texture = canvas
+            mt.Tiled = true
+            mt.ScaleU = 1.6
+            mt.ScaleV = 1.6
+            local sa = Instance.new("SurfaceAppearance")
+            sa.Material = variant
+            sa.MainTexture = mt
+            part.SurfaceAppearance = sa
+        end)
+    end
+    if not done then
+        local matName
+        if MAT_PURE[texKey] then
+            matName = MAT_PURE[texKey]
+        else
+            matName = MAT_FALLBACK[texKey] or "SmoothPlastic"
+        end
+        part.Material = safeMat(matName)
+        part.Color = col
+    end
+end
+
+-- ============================================================
+-- CONSTRUTOR DE CENAS
+-- ============================================================
+local building = false
+
+local function buildScene(scene, atPosition, status)
+    local model = Instance.new("Model")
+    model.Name = "Roblox3D_" .. tostring(scene.name or "modelo")
+    model:SetAttribute("Roblox3D", true)
+    local parts = scene.parts or {}
+    local total = #parts
+    local made = 0
+    local firstPart = nil
+    for i = 1, total do
+        local s = parts[i]
+        local part
+        if s[1] == "box" then
+            part = Instance.new("Part")
+            part.Size = Vector3.new(s[2][1], s[2][2], s[2][3])
+        elseif s[1] == "cylinder" then
+            part = Instance.new("MeshPart")
+            part.MeshId = "rbxasset://Meshes/cylinder_main"
+            part.Size = Vector3.new(s[2][1] * 2, s[2][2], s[2][1] * 2)
+        else
+            part = Instance.new("MeshPart")
+            part.MeshId = "rbxasset://Meshes/ball_main"
+            part.Size = Vector3.new(s[2][1] * 2, (s[2][2] or s[2][1]) * 2, (s[2][3] or s[2][1]) * 2)
+        end
+        part.Name = s[7] or ("Part" .. i)
+        part.Anchored = true
+        part.CFrame = CFrame.new(s[3][1], s[3][2], s[3][3])
+            * CFrame.fromEulerAnglesXYZ(math.rad(s[4][1]), math.rad(s[4][2]), math.rad(s[4][3]))
+        applyLook(part, s[5], s[6])
+        part.Parent = model
+        if not firstPart then firstPart = part end
+        made = made + 1
+        if made % 25 == 0 or made == total then
+            status(string.format("construindo… %d/%d", made, total))
+        end
+        if made % 40 == 0 then task.wait() end
+    end
+    model.PrimaryPart = firstPart
+    if atPosition then
+        pcall(function() model:PivotTo(atPosition) end)
+    end
+    model.Parent = workspace
+    return model, made
+end
+
+local function playerAnchor()
+    local player = Players.LocalPlayer
+    local char = player and player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return Vector3.new(0, 0, 0), 0 end
+    local forward = hrp.CFrame.LookVector
+    forward = Vector3.new(forward.X, 0, forward.Z)
+    if forward.Magnitude < 0.1 then forward = Vector3.new(0, 0, -1) end
+    forward = forward.Unit
+    local pos = hrp.Position + forward * 20
+    pos = Vector3.new(pos.X, hrp.Position.Y - 3, pos.Z)
+    local yaw = math.atan2(forward.X, forward.Z) * 180 / math.pi
+    return pos, yaw
+end
+
+-- ============================================================
+-- GUI (toggle + chat + ativação da IA)
+-- ============================================================
+local uiState = {open = false}
+local refs = {}
+
+local function makeCorner(parent, r)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, r or 10)
+    c.Parent = parent
+    return c
+end
+
+local function setupGui(player)
+    local parent
+    if RunService:IsStudio() then
+        parent = game:GetService("CoreGui")
+    else
+        parent = player:WaitForChild("PlayerGui")
+    end
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "Roblox3D_UI"
+    gui.ResetOnSpawn = false
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.DisplayOrder = 9999
+    gui.Parent = parent
+
+    -- toggle flutuante
+    local toggle = Instance.new("TextButton")
+    toggle.Name = "Toggle"
+    toggle.Size = UDim2.fromOffset(54, 54)
+    -- padrão: borda esquerda, meio da tela — ARRASTE para onde quiser
+    toggle.Position = UDim2.new(0, 10, 0.5, -27)
+    toggle.BackgroundColor3 = Color3.fromRGB(38, 42, 52)
+    toggle.BackgroundTransparency = 0.15
+    toggle.Text = "🏛"
+    toggle.TextSize = 26
+    toggle.Font = Enum.Font.Gotham
+    toggle.AutoButtonColor = true
+    makeCorner(toggle, 27)
+    toggle.Parent = gui
+    refs.toggle = toggle
+
+    -- painel
+    local panel = Instance.new("Frame")
+    panel.Name = "Panel"
+    panel.Size = UDim2.fromOffset(380, 350)
+    panel.Position = UDim2.new(1, -396, 1, -362)
+    panel.BackgroundColor3 = Color3.fromRGB(22, 24, 30)
+    panel.BackgroundTransparency = 0.08
+    panel.Visible = false
+    panel.Active = true
+    panel.Draggable = true
+    makeCorner(panel, 12)
+    panel.Parent = gui
+    refs.panel = panel
+
+    local titleBar = Instance.new("Frame")
+    titleBar.Size = UDim2.new(1, 0, 0, 36)
+    titleBar.BackgroundColor3 = Color3.fromRGB(36, 40, 50)
+    makeCorner(titleBar, 12)
+    titleBar.Parent = panel
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -100, 1, 0)
+    title.Position = UDim2.new(0, 14, 0, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "🤖 Roblox3D — me peça um modelo"
+    title.TextColor3 = Color3.fromRGB(235, 238, 245)
+    title.Font = Enum.Font.GothamMedium
+    title.TextSize = 15
+    title.Parent = titleBar
+
+    local gearBtn = Instance.new("TextButton")
+    gearBtn.Size = UDim2.fromOffset(26, 26)
+    gearBtn.Position = UDim2.new(1, -66, 0.5, -13)
+    gearBtn.BackgroundColor3 = Color3.fromRGB(56, 62, 78)
+    gearBtn.Text = "⚙"
+    gearBtn.TextColor3 = Color3.new(1, 1, 1)
+    gearBtn.Font = Enum.Font.GothamBold
+    gearBtn.TextSize = 14
+    makeCorner(gearBtn, 6)
+    gearBtn.Parent = titleBar
+
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Size = UDim2.fromOffset(26, 26)
+    closeBtn.Position = UDim2.new(1, -36, 0.5, -13)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(90, 50, 55)
+    closeBtn.Text = "✕"
+    closeBtn.TextColor3 = Color3.new(1, 1, 1)
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.TextSize = 14
+    makeCorner(closeBtn, 6)
+    closeBtn.Parent = titleBar
+
+    local status = Instance.new("TextLabel")
+    status.Size = UDim2.new(1, -28, 0, 18)
+    status.Position = UDim2.new(0, 14, 0, 40)
+    status.BackgroundTransparency = 1
+    status.Text = "Status: pronto"
+    status.TextColor3 = Color3.fromRGB(120, 200, 140)
+    status.Font = Enum.Font.Gotham
+    status.TextSize = 12
+    status.TextXAlignment = Enum.TextXAlignment.Left
+    status.Parent = panel
+    refs.status = status
+
+    -- ===== caixa de ativação da IA (visível até colocar o token) =====
+    local setupBox = Instance.new("Frame")
+    setupBox.Size = UDim2.new(1, -28, 0, 196)
+    setupBox.Position = UDim2.new(0, 14, 0, 58)
+    setupBox.BackgroundColor3 = Color3.fromRGB(30, 33, 42)
+    makeCorner(setupBox, 10)
+    setupBox.Parent = panel
+
+    local function setupLabel(text, y, h, size, color, wrapped)
+        local l = Instance.new("TextLabel")
+        l.Size = UDim2.new(1, -20, 0, h)
+        l.Position = UDim2.new(0, 10, 0, y)
+        l.BackgroundTransparency = 1
+        l.Text = text
+        l.TextColor3 = color or Color3.fromRGB(210, 216, 228)
+        l.Font = Enum.Font.Gotham
+        l.TextSize = size or 12
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        l.TextYAlignment = Enum.TextYAlignment.Top
+        l.TextWrapped = wrapped or true
+        l.Parent = setupBox
+        return l
+    end
+    local function setupField(placeholder, y, init)
+        local f = Instance.new("TextBox")
+        f.Size = UDim2.new(1, -20, 0, 26)
+        f.Position = UDim2.new(0, 10, 0, y)
+        f.BackgroundColor3 = Color3.fromRGB(42, 46, 58)
+        f.PlaceholderText = placeholder
+        f.PlaceholderColor3 = Color3.fromRGB(110, 116, 130)
+        f.Text = init or ""
+        f.TextColor3 = Color3.fromRGB(235, 238, 245)
+        f.Font = Enum.Font.Gotham
+        f.TextSize = 12
+        f.ClearTextOnFocus = false
+        makeCorner(f, 7)
+        f.Parent = setupBox
+        return f
+    end
+
+    setupLabel("🔑 Ativar a IA (uma vez só)", 6, 18, 13, Color3.fromRGB(240, 243, 250))
+    setupLabel("1) conta grátis em puter.com\n2) dashboard → \"Create token\"\n3) cole o token abaixo", 27, 38, 11, Color3.fromRGB(160, 168, 185))
+    local keyField = setupField("token (puter.com/dashboard → Create token)", 69, aiCfg.key)
+    local modelField = setupField("modelo (deixe como está, ou: claude-sonnet-5)", 99, aiCfg.model)
+    local baseField = setupField("URL da API — Puter já vem; Groq: https://api.groq.com/openai/v1", 129, aiCfg.base)
+    local connectBtn = Instance.new("TextButton")
+    connectBtn.Size = UDim2.new(1, -20, 0, 28)
+    connectBtn.Position = UDim2.new(0, 10, 0, 159)
+    connectBtn.BackgroundColor3 = Color3.fromRGB(76, 110, 245)
+    connectBtn.Text = "Ativar IA ✅"
+    connectBtn.TextColor3 = Color3.new(1, 1, 1)
+    connectBtn.Font = Enum.Font.GothamMedium
+    connectBtn.TextSize = 13
+    makeCorner(connectBtn, 7)
+    connectBtn.Parent = setupBox
+    local setupErr = setupLabel("", 189, 12, 10, Color3.fromRGB(255, 130, 130), false)
+
+    -- ===== chat =====
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Size = UDim2.new(1, -28, 0, 200)
+    scroll.Position = UDim2.new(0, 14, 0, 58)
+    scroll.BackgroundTransparency = 1
+    scroll.BorderSizePixel = 0
+    scroll.ScrollBarThickness = 6
+    scroll.ScrollBarImageColor3 = Color3.fromRGB(90, 96, 110)
+    scroll.CanvasSize = UDim2.new()
+    scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    scroll.Visible = false
+    scroll.Parent = panel
+    refs.scroll = scroll
+
+    -- botões rápidos
+    local chips = Instance.new("Frame")
+    chips.Size = UDim2.new(1, -28, 0, 30)
+    chips.Position = UDim2.new(0, 14, 1, -86)
+    chips.BackgroundTransparency = 1
+    chips.Parent = panel
+    refs.chips = chips
+
+    local chipX = 0
+    for _, txt in ipairs({"Favela", "Capivara", "Armadura", "Cabana", "Limpar", "Ajuda"}) do
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.fromOffset(#txt * 7.6 + 18, 26)
+        b.Position = UDim2.new(0, chipX, 0, 0)
+        b.BackgroundColor3 = Color3.fromRGB(50, 56, 70)
+        b.Text = txt
+        b.TextColor3 = Color3.fromRGB(205, 212, 228)
+        b.Font = Enum.Font.GothamMedium
+        b.TextSize = 13
+        b.AutoButtonColor = true
+        makeCorner(b, 13)
+        b.Parent = chips
+        chipX = chipX + #txt * 7.6 + 26
+    end
+
+    local inputBox = Instance.new("TextBox")
+    inputBox.Size = UDim2.new(1, -100, 0, 36)
+    inputBox.Position = UDim2.new(0, 14, 1, -48)
+    inputBox.BackgroundColor3 = Color3.fromRGB(42, 46, 58)
+    inputBox.PlaceholderText = "descreva o que quer… ex.: cabana de caçador primitivo"
+    inputBox.TextColor3 = Color3.fromRGB(235, 238, 245)
+    inputBox.PlaceholderColor3 = Color3.fromRGB(120, 126, 140)
+    inputBox.Font = Enum.Font.Gotham
+    inputBox.TextSize = 14
+    inputBox.ClearTextOnFocus = false
+    makeCorner(inputBox, 8)
+    inputBox.Parent = panel
+    refs.input = inputBox
+
+    local sendBtn = Instance.new("TextButton")
+    sendBtn.Size = UDim2.fromOffset(74, 36)
+    sendBtn.Position = UDim2.new(1, -88, 1, -48)
+    sendBtn.BackgroundColor3 = Color3.fromRGB(76, 110, 245)
+    sendBtn.Text = "Criar ✨"
+    sendBtn.TextColor3 = Color3.new(1, 1, 1)
+    sendBtn.Font = Enum.Font.GothamMedium
+    sendBtn.TextSize = 14
+    makeCorner(sendBtn, 8)
+    sendBtn.Parent = panel
+    refs.send = sendBtn
+
+    -- ================= comportamento =================
+    local msgY = 0
+    local function addMsg(text, color)
+        local label = Instance.new("TextLabel")
+        local lines = 1
+        for chunk in text:gmatch(".-.{0,44}") do lines = lines + 1 end
+        local h = math.max(22, 18 + 15 * lines)
+        label.Size = UDim2.new(1, 0, 0, h)
+        label.Position = UDim2.new(0, 0, 0, msgY)
+        msgY = msgY + h + 4
+        label.BackgroundTransparency = 1
+        label.Text = text
+        label.TextXAlignment = Enum.TextXAlignment.Left
+        label.TextYAlignment = Enum.TextYAlignment.Top
+        label.TextWrapped = true
+        label.TextColor3 = color or Color3.fromRGB(210, 216, 228)
+        label.Font = Enum.Font.Gotham
+        label.TextSize = 13
+        label.Parent = scroll
+        scroll.CanvasPosition = Vector2.new(0, 1e6)
+    end
+    refs.addMsg = addMsg
+
+    local function setStatus(text, okColor)
+        status.Text = "Status: " .. text
+        status.TextColor3 = okColor or Color3.fromRGB(120, 200, 140)
+    end
+    refs.setStatus = setStatus
+
+    local function showSetup()
+        keyField.Text = aiCfg.key
+        modelField.Text = aiCfg.model
+        baseField.Text = aiCfg.base
+        setupErr.Text = ""
+        setupBox.Visible = true
+        scroll.Visible = false
+        chips.Visible = false
+        inputBox.Visible = false
+        sendBtn.Visible = false
+    end
+    local function hideSetup()
+        setupBox.Visible = false
+        scroll.Visible = true
+        chips.Visible = true
+        inputBox.Visible = true
+        sendBtn.Visible = true
+    end
+
+    local QUICK = {
+        Favela = "favela brasileira realista e ultra detalhada em colina: 10 casas de 2-3 andares coloridas com portas e janelas, cada casa com tanque de água e antena no telhado, escadarias de pedra ligando as casas, rua principal com mercado de rua com toldos, postes com fiação, terrenos em camadas, tudo entrável com interiores mobiliados",
+        Capivara = "capivara realista em detalhes: corpo robusto marrom acastanhado, cabeça comprida com focinho largo e achatado, olhos e orelhas pequenos, patas curtas e grossas, apoiada no chão olhando para a frente, ao lado um pequeno espelho d'água (caixa azul agua) e algumas plantas e pedras",
+        Armadura = "armadura medieval completa em um cavaleiro: elmo, gola, ombreiras grandes, braçadeiras, peitoral com detalhe, cotas nas costelas, joelheiras, grevas, coturnos, cota de malha nas axilas, escudo redondo com brasão dourado, espada presa no cinto, materiais metal e dourado",
+        Cabana = "cabana de caçador primitiva realista: parede de troncos de madeira cruzados (cilindros), teto de palha inclinado com 2 faces, entrada aberta na frente, fogueira central com anel de 6 pedras e chama (box neon laranja + vermelho), pilha de caça e peles, ferramentas e tochas na parede, chão de terra, 3 plantas e um pequeno riacho fora",
+    }
+
+    local function clearAll()
+        for _, obj in ipairs(workspace:GetChildren()) do
+            if obj:IsA("Model") and obj:GetAttribute("Roblox3D") then
+                obj:Destroy()
+            end
+        end
+    end
+
+    local function send(text)
+        if building then
+            addMsg("⏳ ainda estou construindo… aguarde terminar.", Color3.fromRGB(250, 200, 90))
+            return
+        end
+        text = (text or ""):gsub("%s+$", ""):gsub("^%s+", "")
+        if text == "" then return end
+        addMsg("você: " .. text, Color3.fromRGB(140, 180, 255))
+        inputBox.Text = ""
+
+        local p = text:lower()
+        if p:find("limpar") or p:find("apagar") or p == "clear" then
+            clearAll()
+            addMsg("🧹 tudo limpo!", Color3.fromRGB(140, 230, 170))
+            return
+        end
+        if p:find("ajuda") or p == "help" then
+            addMsg("Peça qualquer coisa: favela, capivara, armadura medieval, cabana, castelo, carro, espada, cidade…\nDicas:\n• seja específico (\"ultra detalhado\", \"tudo entrável e mobiliado\")\n• o modelo aparece NA FRENTE do seu avatar\n• botão Limpar apaga tudo\n• ⚙ (no título) troca token/modelo\n• modelos bons no puter: claude-sonnet-5, gemini-3.1-flash-lite, grok-4-1-fast", Color3.fromRGB(180, 188, 205))
+            return
+        end
+
+        if aiCfg.key == "" then
+            addMsg("🔑 A IA ainda não está ativa. Toque no ⚙ (canto do título) e cole um token Puter grátis — leva 1 minuto. Depois é só pedir!", Color3.fromRGB(250, 200, 90))
+            showSetup()
+            return
+        end
+
+        building = true
+        setStatus("pensando… (IA desenhando a cena)", Color3.fromRGB(250, 200, 90))
+        task.spawn(function()
+            local okText, textOrErr = callLLM(aiCfg, text)
+            if not okText then
+                building = false
+                setStatus("erro", Color3.fromRGB(255, 110, 110))
+                addMsg("❌ " .. textOrErr, Color3.fromRGB(255, 120, 120))
+                return
+            end
+            local okJ, data = pcall(extractJson, textOrErr)
+            if not okJ then
+                building = false
+                setStatus("resposta sem JSON", Color3.fromRGB(255, 110, 110))
+                addMsg("❌ a IA respondeu, mas sem JSON válido — tente de novo: " .. tostring(data):sub(1, 120), Color3.fromRGB(255, 120, 120))
+                return
+            end
+            local scene = normalizeScene(data)
+            if #scene.parts < 3 then
+                building = false
+                setStatus("cena vazia", Color3.fromRGB(255, 110, 110))
+                addMsg("❌ a IA respondeu pouca coisa — reenvie o pedido (ou detalhe mais).", Color3.fromRGB(255, 120, 120))
+                return
+            end
+            local pos, yaw = playerAnchor()
+            setStatus("construindo… 0/" .. #scene.parts, Color3.fromRGB(250, 200, 90))
+            local model, made = buildScene(scene, CFrame.new(pos) * CFrame.fromEulerAnglesY(math.rad(yaw)), function(t)
+                setStatus(t, Color3.fromRGB(250, 200, 90))
+            end)
+            building = false
+            setStatus("pronto", Color3.fromRGB(120, 200, 140))
+            addMsg(string.format("✅ %s construído com %d parts! Está NA FRENTE do seu avatar — aproxime e entre. No Explorer: Workspace > %s (organize à vontade).", scene.name, made, model.Name), Color3.fromRGB(140, 230, 170))
+        end)
+    end
+    refs.send = send
+
+    for _, b in ipairs(chips:GetChildren()) do
+        if b:IsA("TextButton") then
+            b.MouseButton1Click:Connect(function()
+                if b.Text == "Limpar" then
+                    send("limpar")
+                elseif b.Text == "Ajuda" then
+                    send("ajuda")
+                else
+                    send(QUICK[b.Text])
+                end
+            end)
+        end
+    end
+
+    sendBtn.MouseButton1Click:Connect(function() send() end)
+    inputBox.FocusLost:Connect(function() send() end)
+
+    -- ===== ativação da IA =====
+    local function refreshStatus()
+        if aiCfg.key ~= "" then
+            setStatus("IA ativa: " .. aiCfg.model, Color3.fromRGB(120, 200, 140))
+        else
+            setStatus("IA desativada — toque no ⚙", Color3.fromRGB(250, 200, 90))
+        end
+    end
+
+    connectBtn.MouseButton1Click:Connect(function()
+        local key = keyField.Text:match("^%s*(.-)%s*$")
+        local model = modelField.Text:match("^%s*(.-)%s*$")
+        local base = baseField.Text:match("^%s*(.-)%s*$")
+        if key == "" then
+            setupErr.Text = "cole o token primeiro 🙂"
+            return
+        end
+        local cfg = {
+            key = key,
+            model = (model ~= "" and model) or AI_DEFAULTS.model,
+            base = ((base ~= "" and base) or AI_DEFAULTS.base):gsub("/+$", ""),
+        }
+        saveCfg(cfg)
+        setupErr.Text = ""
+        connectBtn.Text = "testando…"
+        task.spawn(function()
+            local okv, err = validateLLM(aiCfg)
+            if okv then
+                connectBtn.Text = "Ativar IA ✅"
+                refreshStatus()
+                hideSetup()
+                addMsg("✅ IA ativa! Agora é só pedir: favela, capivara, armadura medieval, cabana…", Color3.fromRGB(140, 230, 170))
+                task.wait(0.03)
+                inputBox:CaptureFocus()
+            else
+                connectBtn.Text = "Ativar IA ✅"
+                setupErr.Text = "falhou: " .. tostring(err):sub(1, 80)
+            end
+        end)
+    end)
+
+    gearBtn.MouseButton1Click:Connect(function()
+        if setupBox.Visible then
+            hideSetup()
+            refreshStatus()
+        else
+            showSetup()
+        end
+    end)
+
+    local function toggle()
+        uiState.open = not uiState.open
+        panel.Visible = uiState.open
+        if uiState.open then
+            if aiCfg.key ~= "" then
+                hideSetup()
+                task.wait(0.03)
+                inputBox:CaptureFocus()
+            else
+                showSetup()
+            end
+            refreshStatus()
+        end
+    end
+
+    -- ============================================================
+    -- 🏛 ARRASTÁVEL (toque e mouse) — toque = abrir/fechar o chat
+    -- A posição fica guardada p/ a próxima sessão, assim você
+    -- deixa o botão "estacionado" num canto vazio da UI.
+    -- ============================================================
+    local UIS = game:GetService("UserInputService")
+    local mem
+    do
+        local ok, v = pcall(function() return _G.R3D_UI_MEM end)
+        if ok and v then mem = v end
+    end
+    local function persistPos(pos)
+        local x = pos.X * gui.AbsoluteSize.X + pos.XOffset
+        local y = pos.Y * gui.AbsoluteSize.Y + pos.YOffset
+        mem = {x = x, y = y}
+        pcall(function()
+            _G.R3D_UI_MEM = mem
+            local rs = game:GetService("ReplicatedStorage")
+            local m = rs:FindFirstChild("Roblox3D_UI_State")
+            if not m then
+                m = Instance.new("ModuleScript")
+                m.Name = "Roblox3D_UI_State"
+                m.Parent = rs
+            end
+            m.Source = string.format("return {x = %.1f, y = %.1f}", x, y)
+        end)
+    end
+    local function savedPos()
+        if mem and mem.x then return mem.x, mem.y end
+        local ok, v = pcall(function()
+            local m = game:GetService("ReplicatedStorage"):FindFirstChild("Roblox3D_UI_State")
+            if not m then return nil end
+            return require(m)
+        end)
+        if ok and v and v.x then return v.x, v.y end
+        return nil, nil
+    end
+
+    local spx, spy = savedPos()
+    if spx then
+        toggle.Position = UDim2.new(0, spx, 0, spy)
+    end
+
+    local function clampXY(x, y)
+        local s = gui.AbsoluteSize
+        local w, h = toggle.AbsoluteSize.X, toggle.AbsoluteSize.Y
+        return math.clamp(x, 0, math.max(0, s.X - w)), math.clamp(y, 0, math.max(0, s.Y - h))
+    end
+
+    local function isPointer(t)
+        return t == Enum.UserInputType.Touch or t == Enum.UserInputType.MouseButton1
+    end
+
+    local drag = {active = false, moved = false, startInput = nil, startPos = nil, absSize = nil}
+    toggle.InputBegan:Connect(function(input)
+        if isPointer(input.UserInputType) then
+            drag.active = true
+            drag.moved = false
+            drag.startInput = input.Position
+            drag.startPos = toggle.Position
+            drag.absSize = gui.AbsoluteSize
+        end
+    end)
+    UIS.InputChanged:Connect(function(input)
+        if not drag.active then return end
+        if input.UserInputType ~= Enum.UserInputType.Touch
+            and input.UserInputType ~= Enum.UserInputType.MouseMovement then
+            return
+        end
+        local dx = input.Position.X - drag.startInput.X
+        local dy = input.Position.Y - drag.startInput.Y
+        if not drag.moved and (math.abs(dx) > 6 or math.abs(dy) > 6) then
+            drag.moved = true
+        end
+        if drag.moved then
+            local ax = drag.startPos.X * drag.absSize.X + drag.startPos.XOffset + dx
+            local ay = drag.startPos.Y * drag.absSize.Y + drag.startPos.YOffset + dy
+            local cx, cy = clampXY(ax, ay)
+            toggle.Position = UDim2.new(0, cx, 0, cy)
+        end
+    end)
+    UIS.InputEnded:Connect(function(input)
+        if not drag.active or not isPointer(input.UserInputType) then return end
+        local wasDrag = drag.moved
+        drag.active = false
+        if wasDrag then
+            persistPos(toggle.Position)
+        else
+            toggle()
+        end
+    end)
+
+    closeBtn.MouseButton1Click:Connect(function()
+        uiState.open = false
+        panel.Visible = false
+    end)
+
+    -- boas-vindas
+    addMsg("👋 Fala! Sou o Roblox3D — IA DIRETO no script, sem PC. Toque no 🏛 pra abrir/fechar e ARRASTE ele pra um canto vazio da tela.", Color3.fromRGB(200, 208, 225))
+    addMsg("Ex.: \"favela brasileira realista, tudo entrável e mobiliado\", \"capivara realista\", \"armadura medieval completa\", \"cabana de caçador primitivo\"…", Color3.fromRGB(170, 178, 195))
+    refreshStatus()
+end
+
+Players.PlayerAdded:Connect(function(player)
+    task.spawn(function()
+        player:WaitForChild("PlayerGui")
+        setupGui(player)
+    end)
+end)
+
+-- se já existe jogador conectado (script adicionado com o jogo rodando)
+for _, player in ipairs(Players:GetPlayers()) do
+    task.spawn(function()
+        player:WaitForChild("PlayerGui")
+        setupGui(player)
+    end)
+end
+
+texAPI = probeTextureAPI()
+print("[Roblox3D] AllInOne carregado. texturas: " .. (texAPI and "PBR ativas" or "modo material puro"))
+print("[Roblox3D] IA: " .. (aiCfg.key ~= "" and ("ativa (" .. aiCfg.model .. ")") or "desativada — ative pelo ⚙ do painel (token Puter grátis)"))
