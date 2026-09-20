@@ -1,9 +1,9 @@
--- Snake Animator 5 completo: pronto para hospedar como arquivo Lua raw.
+-- Snake Animator 5.1 completo: pronto para hospedar como arquivo Lua raw.
 if not game:IsLoaded() then game.Loaded:Wait() end
 while not game:GetService("Players").LocalPlayer do task.wait() end
 game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
--- SNAKE ANIMATOR 5.0 / editor visual local para Roblox
--- Fonte completa: hospede SnakeAnimatorV5.lua como Raw no seu GitHub.
+-- SNAKE ANIMATOR 5.1 / editor visual local para Roblox
+-- Fonte completa: hospede SnakeAnimatorV5_1.lua como Raw no seu GitHub.
 -- Execute com seu executor dentro do seu projeto Studio Lite.
 -- O editor nao depende de readfile nem de modulos externos.
 -- Exporte o projeto JSON antes de encerrar o Play.
@@ -1672,7 +1672,7 @@ local playerGui=player:WaitForChild("PlayerGui")
 if playerGui:FindFirstChild("SnakeAnimator") then playerGui.SnakeAnimator:Destroy() end
 
 local C={bg=Color3.fromRGB(13,16,24),panel=Color3.fromRGB(24,29,43),field=Color3.fromRGB(34,43,60),line=Color3.fromRGB(49,65,78),text=Color3.fromRGB(231,239,242),muted=Color3.fromRGB(157,177,185),accent=Color3.fromRGB(103,226,187),dark=Color3.fromRGB(10,39,27),warn=Color3.fromRGB(255,190,121)}
-local V5={active=false,world=true,locked=false,targetMode="part",space="local",uniform=false,opposite=false,snap=false,moveStep=.1,angleStep=5,scaleStep=.1,compact=true,filter="",dirty=true}
+local V5={active=false,world=true,locked=false,targetMode="limb",space="local",uniform=false,opposite=false,snap=false,moveStep=.1,angleStep=5,scaleStep=.1,compact=true,filter="",dirty=true}
 local alive=true
 local connections={}
 local connectionCount=0
@@ -1718,7 +1718,7 @@ window.AnchorPoint=Vector2.new(.5,.5);window.ZIndex=20;corner(window,12)
 make("UIStroke",window,{Color=C.line,Thickness=1})
 local header=frame(window,UDim2.new(),UDim2.new(1,0,0,47),C.panel);header.Active=true;corner(header,12)
 label(header,"SNAKE / ANIMATOR",UDim2.fromOffset(14,3),UDim2.new(1,-135,0,25))
-label(header,"05  •  workspace / transform / motion",UDim2.fromOffset(14,25),UDim2.new(1,-100,0,17),true)
+label(header,"05.1  •  câmera fixa / membros",UDim2.fromOffset(14,25),UDim2.new(1,-100,0,17),true)
 local toggle=button(gui,"◈  Snake Animator",UDim2.new(0,12,1,-52),UDim2.fromOffset(166,38),function() window.Visible=not window.Visible;if window.Visible then V5.active=true end;if V5.layout then V5.layout() end end,true)
 button(header,"—",UDim2.new(1,-76,0,8),UDim2.fromOffset(30,30),function() window.Visible=false end)
 local status=label(window,"Pronto. Selecione um objeto ou abra um rig.",UDim2.new(0,12,1,-32),UDim2.new(1,-24,0,27),true)
@@ -1728,7 +1728,7 @@ end
 local function safe(fn)
     return function(...)
         local ok,err=pcall(fn,...)
-        if not ok then notify(tostring(err):gsub("^.-:%d+: ",""),true);warn("Snake Animator: "..tostring(err)) end
+        if not ok then if V5.camera and V5.camera.active and V5.cancel then pcall(V5.cancel) end;notify(tostring(err):gsub("^.-:%d+: ",""),true);warn("Snake Animator: "..tostring(err)) end
     end
 end
 local function resize()
@@ -2346,8 +2346,90 @@ button(exportPage,"Copiar / selecionar",UDim2.new(0,0,1,-34),UDim2.new(.5,-4,0,3
     notify("Texto selecionado. Use Copiar do teclado/menu do aparelho.")
 end)
 button(exportPage,"Como integrar?",UDim2.new(.5,4,1,-34),UDim2.new(.5,-4,0,32),function()
-    output("SNAKE ANIMATOR 5 / MOTION ASSIST\n\nEditor: execute o fonte completo no seu executor\ndentro do Studio Lite. Não depende de readfile.\nMotion > Física: apoio e salto.\nAbra Motion > Corpo para controles, contatos e limites.\nProjetos com Body precisam de Bake corporal atualizado\nantes de exportar. As alterações invalidam o bake.\n\nCLIENT: LocalScript; ONLY_USER_ID filtra seu jogador.\nSERVER: Script em ServerScriptService + Receptor v5\nem StarterPlayerScripts. Um receptor por cliente.\nÉ sincronização visual, não física autoritativa.\n\nRemova a chamada automática final e use\nplaySnakeAnimation() no seu sistema.\nanimation.Stop(true) interrompe e restaura.\n\nExporte JSON antes de parar o Play.\nUse os arquivos 09 e 10 para o demo Body.\nLeia LEIA-ME.md para instalação, limites e exemplos.\nNão há equivalência completa ao Cascadeur,\nauto-physics ou garantia de 240 FPS.\n", "Guia rápido V5 • consulte LEIA-ME.md no pacote.")
+    output("SNAKE ANIMATOR 5.1 / MOTION ASSIST\n\nEditor: execute o fonte completo no seu executor\ndentro do Studio Lite. Não depende de readfile.\nMotion > Física: apoio e salto.\nAbra Motion > Corpo para controles, contatos e limites.\nProjetos com Body precisam de Bake corporal atualizado\nantes de exportar. As alterações invalidam o bake.\n\nCLIENT: LocalScript; ONLY_USER_ID filtra seu jogador.\nSERVER: Script em ServerScriptService + Receptor v5\nem StarterPlayerScripts. Um receptor por cliente.\nÉ sincronização visual, não física autoritativa.\n\nRemova a chamada automática final e use\nplaySnakeAnimation() no seu sistema.\nanimation.Stop(true) interrompe e restaura.\n\nExporte JSON antes de parar o Play.\nUse os arquivos 09 e 10 para o demo Body.\nLeia LEIA-ME.md para instalação, limites e exemplos.\nNão há equivalência completa ao Cascadeur,\nauto-physics ou garantia de 240 FPS.\n", "Guia rápido V5 • consulte LEIA-ME.md no pacote.")
 end)
+
+-- V5.1: captura temporária de câmera durante manipulação, não uma câmera permanente.
+local function installCameraGuard()
+    local K={owners={},snapshots={},hooks={},active=false,writing=false};V5.camera=K
+    local binding="SnakeAnimator_GizmoCamera_51"
+    local action="SnakeAnimator_GizmoInput_51"
+    local context
+    pcall(function() context=game:GetService("ContextActionService") end)
+    local function restore(camera,state)
+        if not camera or not camera.Parent then return end
+        pcall(function()
+            camera.CFrame=state.cf;camera.Focus=state.focus;camera.FieldOfView=state.fov
+            camera.CameraSubject=state.subject;camera.CameraType=state.kind
+        end)
+    end
+    function K.enforce()
+        if not K.active or K.writing then return end
+        local camera=Workspace.CurrentCamera;if not camera or not camera.Parent then return end
+        K.writing=true
+        local ok=pcall(function()
+            local state=K.snapshots[camera]
+            if not state then
+                state={cf=camera.CFrame,focus=camera.Focus,fov=camera.FieldOfView,subject=camera.CameraSubject,kind=camera.CameraType}
+                K.snapshots[camera]=state
+                for _,prop in ipairs({"CFrame","Focus","FieldOfView","CameraType"}) do
+                    K.hooks[#K.hooks+1]=camera:GetPropertyChangedSignal(prop):Connect(K.enforce)
+                end
+            end
+            if camera.CameraType~=Enum.CameraType.Scriptable then camera.CameraType=Enum.CameraType.Scriptable end
+            if camera.CFrame~=state.cf then camera.CFrame=state.cf end
+            if camera.Focus~=state.focus then camera.Focus=state.focus end
+            if camera.FieldOfView~=state.fov then camera.FieldOfView=state.fov end
+        end)
+        K.writing=false
+        if not ok then K.releaseAll() end
+    end
+    function K.acquire(owner)
+        K.owners[owner]=true
+        if K.active then return end
+        K.active=true;K.mouse=UserInputService.MouseBehavior
+        pcall(function() UserInputService.MouseBehavior=Enum.MouseBehavior.Default end)
+        if context then pcall(function()
+            context:BindActionAtPriority(action,function() return K.active and Enum.ContextActionResult.Sink or Enum.ContextActionResult.Pass end,false,5000,
+                Enum.UserInputType.Touch,Enum.UserInputType.MouseMovement,Enum.UserInputType.MouseButton2,Enum.UserInputType.MouseWheel)
+        end) end
+        K.bound=pcall(function() RunService:BindToRenderStep(binding,2100,K.enforce) end)
+        K.enforce()
+    end
+    function K.releaseAll()
+        if not K.active then K.owners={};return end
+        K.active=false;K.owners={}
+        if K.bound then pcall(function() RunService:UnbindFromRenderStep(binding) end) end;K.bound=false
+        if context then pcall(function() context:UnbindAction(action) end) end
+        for _,c in ipairs(K.hooks) do c:Disconnect() end;K.hooks={}
+        for camera,state in pairs(K.snapshots) do restore(camera,state) end;K.snapshots={}
+        if K.mouse~=nil then pcall(function() UserInputService.MouseBehavior=K.mouse end) end
+        V5.ignorePickUntil=os.clock()+.2
+    end
+    function K.release(owner)
+        K.owners[owner]=nil
+        if next(K.owners)==nil then K.releaseAll() end
+    end
+    -- Fallback para ambientes sem BindToRenderStep e recuperação de CurrentCamera trocada.
+    connect(RunService.RenderStepped,K.enforce)
+    function K.pointerEnded(input)
+        if input.UserInputType==Enum.UserInputType.MouseButton1 then return true end
+        if input.UserInputType~=Enum.UserInputType.Touch then return false end
+        local ok,touches=pcall(function() return UserInputService:GetTouches() end)
+        if not ok then return false end
+        for _,t in ipairs(touches) do if t~=input and t.UserInputState~=Enum.UserInputState.End and t.UserInputState~=Enum.UserInputState.Cancel then return false end end
+        return true
+    end
+    connect(UserInputService.InputEnded,function(input)
+        if K.pointerEnded(input) then K.releaseAll() end
+    end)
+    connect(UserInputService.WindowFocusReleased,function()
+        if V5.cancel then V5.cancel() end
+        K.releaseAll()
+    end)
+    connect(gui.Destroying,K.releaseAll)
+end
+installCameraGuard()
 
 -- V5: gizmos absolutos por gesto; nativos + alças projetadas para toque.
 local gizmoMode="off"
@@ -2386,8 +2468,13 @@ local function installTransformGizmos()
         return object.CFrame
     end
     function G.mode(mode)
-        assert(not V5.busy and not drag,"Finalize o gesto ou bake")
+        assert(not V5.busy and not drag and not V5.camera.active,"Solte o gizmo atual antes de trocar de ferramenta")
         if mode~="off" then
+            local part=V5.selectedPart
+            if V5.targetMode=="limb" and part and part.Parent and (selected==part or selected and selected:IsA("JointInstance") and selected.Part1==part) then
+                local target=mode=="scale" and part or (V5.findJoint and V5.findJoint(part) or part)
+                if target~=selected then selectObject(target,nil,true) end
+            end
             local p=property(mode)
             if p=="ModelScale" then
                 local rig=project.body and Snake.resolve(project.body.rig)
@@ -2401,7 +2488,7 @@ local function installTransformGizmos()
     end
     function G.begin()
         assert(gizmoMode~="off","Escolha Mover, Girar ou Escalar primeiro")
-        assert(not V5.busy and not drag,"Gesto ou bake já em andamento")
+        assert(not V5.busy and not drag and not V5.camera.active,"Gesto ou bake já em andamento")
         if playing then stopPreview(false) end
         local p=property(gizmoMode);local cf=assert(world(selected),"Referência espacial ausente")
         local base=Snake.read(selected,p)
@@ -2411,6 +2498,7 @@ local function installTransformGizmos()
         drag={object=selected,property=p,base=base,world=cf,values=values,time=playhead,mode=gizmoMode,space=V5.space,uniform=V5.uniform,opposite=V5.opposite,auto=autoKey,changed=false,snap=V5.snap,moveStep=V5.moveStep,angleStep=V5.angleStep,scaleStep=V5.scaleStep}
         if selected:IsA("Motor6D") then drag.transform=selected.Transform end
         V5.drag=true
+        if not selected:IsA("Camera") then V5.camera.acquire("transform") end
     end
     local function stage()
         if drag.changed then return end
@@ -2456,13 +2544,13 @@ local function installTransformGizmos()
     function G.finish()
         if not drag then return end
         local changed,auto=drag.changed,drag.auto
-        drag=nil;V5.drag=false;V5.ignorePickUntil=os.clock()+.2
+        drag=nil;V5.drag=false;V5.camera.release("transform");V5.ignorePickUntil=os.clock()+.2
         refreshInspector();refreshTimeline()
         if changed then notify(auto and "Transformação gravada. A origem em t=0 foi preservada quando necessária." or "Transformação pronta. Use Key transformação para gravar todos os canais alterados.") end
     end
     function G.cancel()
         if not drag then return end
-        local old=drag;drag=nil;V5.drag=false
+        local old=drag;drag=nil;V5.drag=false;V5.camera.release("transform")
         if old.changed then project=old.previous;undoStack=old.undo;redoStack=old.redo end
         if old.object.Parent then
             for _,p in ipairs({"ModelScale","Size","Scale","Pivot","ToolPivot","CFrame","C0","Transform"}) do if old.values[p]~=nil then pcall(Snake.write,old.object,p,old.values[p]) end end
@@ -2470,7 +2558,11 @@ local function installTransformGizmos()
         end
         V5.pending=nil;V5.ignorePickUntil=os.clock()+.2;rebuild();refreshAll();notify("Gesto cancelado; pose e faixas anteriores restauradas.")
     end
-    V5.cancel=G.cancel
+    V5.cancel=function()
+        G.cancel()
+        for _,fn in pairs(V5.solverCancel or {}) do fn() end
+        V5.camera.releaseAll()
+    end
     function G.nudge(index,direction)
         local amount=gizmoMode=="rotate" and math.rad(V5.angleStep) or (gizmoMode=="scale" and V5.scaleStep or V5.moveStep)
         G.begin()
@@ -2499,7 +2591,7 @@ local function installTransformGizmos()
         local b=button(poseInner,"+"..name,UDim2.new((i-1)/3+1/6,0,0,670),UDim2.new(1/6,-3,0,36),safe(function() G.nudge(i,1) end));b.TextColor3=axisColors[i]
     end
     button(poseInner,"Key transformação",UDim2.fromOffset(0,718),UDim2.new(1,0,0,36),safe(G.keyTransform),true)
-    button(poseInner,"Cancelar gesto",UDim2.fromOffset(0,765),UDim2.new(1,0,0,34),G.cancel)
+    button(poseInner,"Cancelar gesto",UDim2.fromOffset(0,765),UDim2.new(1,0,0,34),function() V5.cancel() end)
     local function face(faceId)
         local v=Vector3.FromNormalId(faceId)
         if math.abs(v.X)>.5 then return 1,v.X elseif math.abs(v.Y)>.5 then return 2,v.Y else return 3,v.Z end
@@ -2530,9 +2622,11 @@ local function installTransformGizmos()
         if amount then guardedApply(drag.touchAxis,amount,1) end
     end))
     connect(UserInputService.InputEnded,safe(function(input)
-        if drag and drag.input and (input==drag.input or input.UserInputType==Enum.UserInputType.MouseButton1 and drag.input.UserInputType==Enum.UserInputType.MouseButton1) then G.finish() end
+        if drag and drag.input and (input==drag.input or input.UserInputType==Enum.UserInputType.MouseButton1 and drag.input.UserInputType==Enum.UserInputType.MouseButton1) then G.finish()
+        elseif drag and not drag.input and V5.camera.pointerEnded(input) then G.finish() end
     end))
     connect(RunService.RenderStepped,function()
+        if drag and (not drag.object.Parent or not alive) then G.cancel() end
         local enabled=alive and V5.active and not V5.busy and not playing and selected and selected.Parent and gizmoMode~="off"
         local ok,cf=pcall(function() return enabled and world(selected) end)
         enabled=enabled and ok and cf~=nil and cf~=false
@@ -2924,14 +3018,17 @@ local function installAdvancedTools()
         label(panel,"Sem limites articulares: resultados podem torcer ou atravessar o corpo. O solver preserva os comprimentos, usa pole para a dobra e limita alvos fora do alcance. Não equivale ao auto-posing físico do Cascadeur.",UDim2.fromOffset(4,912),UDim2.new(1,-8,0,80),true)
         connect(handles.MouseButton1Down,safe(function()
             assert(not playing and not A.baking,"Pause antes de usar o gizmo IK")
-            local _,_,_,cfg=chain();snapshot();dragBase=vec(cfg[A.ikGizmo])
+            local _,_,_,cfg=chain();snapshot();dragBase=vec(cfg[A.ikGizmo]);V5.camera.acquire("ik")
         end))
         connect(handles.MouseDrag,safe(function(face,distance)
             if not dragBase or A.ikGizmo=="off" then return end
             local _,_,_,cfg=chain();cfg[A.ikGizmo]=arr(dragBase+Vector3.FromNormalId(face)*distance)
             A.solveIK(autoKey);A.refreshIK();A.ghostDirty=true
         end))
-        connect(handles.MouseButton1Up,function() dragBase=nil;A.dirtyGraph=true;refreshTimeline() end)
+        connect(handles.MouseButton1Up,function() dragBase=nil;V5.camera.release("ik");A.dirtyGraph=true;refreshTimeline() end)
+        connect(UserInputService.InputEnded,function(input) if V5.camera.pointerEnded(input) then dragBase=nil;V5.camera.release("ik") end end)
+        connect(UserInputService.WindowFocusReleased,function() dragBase=nil;V5.camera.release("ik") end)
+        V5.solverCancel=V5.solverCancel or {};V5.solverCancel.ik=function() dragBase=nil;V5.camera.release("ik") end
         function A.updateIKMarkers()
             local cfg=project.ik
             local visible=cfg and (A.ikGizmo~="off" or (activePage=="Motion" and subActive=="IK" and window.Visible))
@@ -3780,7 +3877,7 @@ local function installAdvancedTools()
         local baseDrag
         connect(handles.MouseButton1Down,safe(function()
             assert(not playing and not A.baking,"Pause antes de arrastar");local e=eff();snapshot()
-            local target,pole=BodyMath.control(e,playhead);baseDrag=B.gizmo=="pole" and pole or target
+            local target,pole=BodyMath.control(e,playhead);baseDrag=B.gizmo=="pole" and pole or target;V5.camera.acquire("body")
         end))
         connect(handles.MouseDrag,safe(function(face,distance)
             if not baseDrag then return end
@@ -3789,14 +3886,17 @@ local function installAdvancedTools()
             customKey(e[channel],playhead,baseDrag+Vector3.FromNormalId(face)*distance)
             B.solve(playhead,true);B.refreshFields()
         end))
-        connect(handles.MouseButton1Up,function() baseDrag=nil;B.refresh() end)
+        connect(handles.MouseButton1Up,function() baseDrag=nil;V5.camera.release("body");B.refresh() end)
+        connect(UserInputService.InputEnded,function(input) if V5.camera.pointerEnded(input) then baseDrag=nil;V5.camera.release("body") end end)
+        connect(UserInputService.WindowFocusReleased,function() baseDrag=nil;V5.camera.release("body") end)
+        V5.solverCancel=V5.solverCancel or {};V5.solverCancel.body=function() baseDrag=nil;V5.camera.release("body") end
         function B.update()
             local body=project.body;local e=body and body.effectors[B.selected]
             local visible=e and (B.gizmo~="off" or (activePage=="Motion" and subActive=="Corpo" and window.Visible))
             goalMarker.Transparency=visible and .1 or 1;poleMarker.Transparency=visible and .2 or 1;actualMarker.Transparency=visible and .2 or 1
             handles.Visible=e~=nil and B.gizmo~="off" and not playing and not A.baking
             handles.Adornee=B.gizmo=="pole" and poleMarker or goalMarker
-            gizmoSelect.Text="Gizmo Body: "..B.gizmo
+            gizmoSelect.Text="Gizmo Body: "..(B.gizmo=="off" and "Off" or B.gizmo)
             if e and visible then
                 local target,pole=BodyMath.control(e,playhead);goalMarker.CFrame=CFrame.new(target);poleMarker.CFrame=CFrame.new(pole)
                 local tip=Snake.resolve(e.tip);local rig=Snake.resolve(body.rig)
@@ -4267,6 +4367,7 @@ button(header,"↶",UDim2.new(1,-111,0,8),UDim2.fromOffset(30,30),safe(function(
 local closeEditor
 closeEditor=function()
     if not alive then return end
+    if V5.cancel then V5.cancel() end;if V5.camera then V5.camera.releaseAll() end
     stopPreview(true);if advancedHooks.cleanup then advancedHooks.cleanup() end;alive=false
     for _,c in ipairs(connections) do c:Disconnect() end
     selectionBox:Destroy();if gizmoProxy then gizmoProxy:Destroy() end;gui:Destroy()
@@ -4276,6 +4377,7 @@ button(header,"×",UDim2.new(1,-41,0,8),UDim2.fromOffset(30,30),function()
 end)
 connect(gui.Destroying,function()
     if alive then
+        if V5.cancel then V5.cancel() end;if V5.camera then V5.camera.releaseAll() end
         alive=false;if advancedHooks.cleanup then advancedHooks.cleanup() end;releaseCamera();restoreOriginals()
         for _,c in ipairs(connections) do c:Disconnect() end
         if selectionBox.Parent then selectionBox:Destroy() end
@@ -4347,7 +4449,7 @@ end)
 local function installWorkspaceUI()
     local W={external="desconectado",connections={},touches={},lastPoll=0};V5.workspace=W
     local toolbar=frame(gui,UDim2.fromOffset(12,48),UDim2.fromOffset(620,82),C.panel);toolbar.Name="SnakeWorkspaceToolbar";toolbar.ZIndex=20;corner(toolbar,10)
-    local title=label(toolbar,"SNAKE 05  /  WORKSPACE",UDim2.fromOffset(10,5),UDim2.new(1,-20,0,24));title.TextColor3=C.accent
+    local title=label(toolbar,"SNAKE 05.1  /  MEMBROS",UDim2.fromOffset(10,5),UDim2.new(1,-20,0,24));title.TextColor3=C.accent
     local dock=frame(gui,UDim2.new(0,10,1,-166),UDim2.new(1,-20,0,154),C.panel);dock.Name="SnakeTimelineDock";dock.ZIndex=20;corner(dock,10)
     local targetLabel=label(dock,"Toque numa peça na cena",UDim2.fromOffset(10,5),UDim2.new(.7,-12,0,24));targetLabel.TextTruncate=Enum.TextTruncate.AtEnd
     local miniTime=box(dock,"0",UDim2.new(.7,0,0,5),UDim2.new(.3,-10,0,28));miniTime.PlaceholderText="Tempo da cena"
@@ -4389,6 +4491,16 @@ local function installWorkspaceUI()
         end
         return false
     end
+    -- A junta pode estar num Model ancestral, não no Model mais próximo da Part.
+    function V5.findJoint(part)
+        local scope=part.Parent
+        while scope and scope~=Workspace do
+            if scope:IsA("Model") then
+                for _,m in ipairs(scope:GetDescendants()) do if m:IsA("Motor6D") and m.Part1==part then return m end end
+            end
+            scope=scope.Parent
+        end
+    end
     local function mapTarget(obj)
         if not obj:IsA("BasePart") then return obj end
         if V5.targetMode=="rig" then
@@ -4398,24 +4510,36 @@ local function installWorkspaceUI()
                 node=node.Parent
             end
             return first or obj
-        elseif V5.targetMode=="joint" then
-            local rig=obj:FindFirstAncestorOfClass("Model")
-            if rig then for _,m in ipairs(rig:GetDescendants()) do if m:IsA("Motor6D") and m.Part1==obj then return m end end end
-            error("Esta Part não tem Motor6D de entrada. Use seleção Part ou escolha a junta no Explorer.")
+        elseif V5.targetMode=="joint" or V5.targetMode=="limb" then
+            if V5.targetMode=="limb" and gizmoMode=="scale" then return obj end
+            local joint=V5.findJoint(obj)
+            if joint then return joint end
+            if V5.targetMode=="joint" then error("Esta Part não tem Motor6D de entrada. Use Membros automático ou Part livre") end
         end
         return obj
     end
     function W.select(obj,origin)
-        if not alive or not V5.active or V5.locked or V5.drag or V5.busy or playing then return false end
-        if type(obj)=="table" and not obj.IsA then obj=obj[1] end
+        if not alive or not V5.active or V5.locked or V5.drag or V5.busy or playing or V5.camera.active then return false end
+        if type(obj)=="table" and not obj.IsA then
+            local list=obj;obj=list[1]
+            if V5.targetMode=="limb" or V5.targetMode=="joint" then
+                for _,entry in ipairs(list) do local ok,isPart=pcall(function() return entry:IsA("BasePart") end);if ok and isPart then obj=entry;break end end
+            end
+        end
         local ok,valid=pcall(function() return obj and obj.Parent and obj:IsA("Instance") and not helper(obj) end)
         if not ok or not valid then return false end
+        if obj:IsA("Model") and (V5.targetMode=="limb" or V5.targetMode=="joint") then
+            if W.ignoredModel~=obj then notify("O Explorer informou o rig inteiro. Toque no braço/perna na cena; Membros não substitui a peça pelo Model.");W.ignoredModel=obj end
+            return false
+        end
+        local part=obj:IsA("BasePart") and obj or (obj:IsA("JointInstance") and obj.Part1 or nil)
         local target=mapTarget(obj)
         local locOK=pcall(Snake.locate,target);if not locOK then return false end
+        V5.selectedPart=part;W.ignoredModel=nil
         selectObject(target,nil,true)
         if gizmoMode~="off" then local success=pcall(V5.gizmo.mode,gizmoMode);if not success then gizmoMode="off";gizmoButton.Text="Gizmo: Off" end end
         V5.pending=nil;V5.dirty=true
-        notify("Selecionado no "..origin..": "..target.Name)
+        notify("Selecionado no "..origin..": "..(part and part.Name.." → " or "")..target.Name.." / "..tostring(selectedProperty))
         return true
     end
     function W.pick(position)
@@ -4425,8 +4549,14 @@ local function installWorkspaceUI()
         local ignore={selectionBox,gizmoProxy}
         local visual=Workspace:FindFirstChild("SnakeEditorVisuals");if visual then ignore[#ignore+1]=visual end
         params.FilterDescendantsInstances=ignore
-        local hit=Workspace:Raycast(ray.Origin,ray.Direction*3000,params)
-        if hit then W.select(hit.Instance,"mundo") end
+        for _=1,16 do
+            params.FilterDescendantsInstances=ignore
+            local hit=Workspace:Raycast(ray.Origin,ray.Direction*3000,params)
+            if not hit then return end
+            if (V5.targetMode=="limb" or V5.targetMode=="joint") and hit.Instance.Name=="HumanoidRootPart" then
+                ignore[#ignore+1]=hit.Instance
+            else W.select(hit.Instance,"mundo");return end
+        end
     end
     -- Ponte explícita: adaptadores do Explorer podem enviar Instance ou {Instance,...}.
     local inputBridge=make("BindableEvent",gui,{Name="SelectionInput"})
@@ -4468,6 +4598,24 @@ local function installWorkspaceUI()
             choices("Escolha o indicador usado PELO EXPLORER",candidates,pairAdornment)
         end)
     end
+    function W.chooseTarget()
+        choices("O que selecionar na cena?",{
+            {label="Membros automático (animar braço/perna pela junta)",value="limb"},
+            {label="Part / MeshPart (Size e CFrame)",value="part"},
+            {label="Junta Motor6D da Part (C0)",value="joint"},
+            {label="Rig / Model inteiro",value="rig"}},function(v)
+                assert(not V5.drag and not V5.busy and not V5.camera.active,"Solte o gizmo primeiro")
+                V5.targetMode=v;W.lastExternal=nil;W.ignoredModel=nil
+                if V5.selectedPart and V5.selectedPart.Parent then
+                    if v=="joint" and not V5.findJoint(V5.selectedPart) then
+                        gizmoMode="off";gizmoButton.Text="Gizmo: Off";notify("Modo Juntas: toque num membro conectado por Motor6D.")
+                    else W.select(V5.selectedPart,"modo de seleção") end
+                end
+            end)
+        window.Visible=true;V5.layout()
+    end
+    title.Size=UDim2.new(.58,-12,0,24)
+    local targetButton=button(toolbar,"Membros ▾",UDim2.new(.58,0,0,4),UDim2.new(.42,-8,0,27),safe(W.chooseTarget))
     local function options()
         choices("Workspace • preferências",{
             {label="Seleção: "..(V5.world and "mundo ligado" or "mundo desligado"),value="world"},
@@ -4483,7 +4631,7 @@ local function installWorkspaceUI()
             {label="Gerar JSON editável agora (Ctrl+S)",value="save"}},function(mode)
             assert(not V5.drag and not V5.busy,"Finalize o gesto/bake")
             if mode=="world" then V5.world=not V5.world
-            elseif mode=="target" then choices("Selecionar ao tocar numa Part",{{label="Part / MeshPart (Size e CFrame)",value="part"},{label="Junta Motor6D da Part (C0)",value="joint"},{label="Rig / Model inteiro",value="rig"}},function(v) V5.targetMode=v end)
+            elseif mode=="target" then W.chooseTarget()
             elseif mode=="lock" then V5.locked=not V5.locked
             elseif mode=="external" then W.connectExplorer()
             elseif mode=="space" then V5.space=V5.space=="local" and "world" or "local"
@@ -4542,7 +4690,7 @@ local function installWorkspaceUI()
             if n>1 and W.pointer then W.pointer.multi=true end
         end
         if not V5.active or processed or UserInputService:GetFocusedTextBox() then return end
-        if V5.drag or V5.busy or playing then return end
+        if V5.drag or V5.busy or playing or V5.camera.active then return end
         local ctrl=UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
         if ctrl and input.KeyCode==Enum.KeyCode.S then
             output(projectJSON(false),"JSON pronto: copie e salve fora da sessão.");showPage("Exportar");window.Visible=true;V5.layout();return
@@ -4565,7 +4713,7 @@ local function installWorkspaceUI()
         local p=W.pointer
         if p and input==p.input then
             W.pointer=nil
-            if not V5.drag and not V5.busy and not playing and os.clock()>=(V5.ignorePickUntil or 0) and TransformMath.tap(p.start,input.Position,os.clock()-p.time,p.multi) and not uiHit(input.Position) then
+            if not V5.drag and not V5.busy and not V5.camera.active and not playing and os.clock()>=(V5.ignorePickUntil or 0) and TransformMath.tap(p.start,input.Position,os.clock()-p.time,p.multi) and not uiHit(input.Position) then
                 W.pick(input.Position);pickInWorld=false;pickButton.Text="Selecionar no mundo"
             end
         end
@@ -4590,14 +4738,15 @@ local function installWorkspaceUI()
         end
         marker.Position=UDim2.new(playhead/project.duration,0,0,0)
         if UserInputService:GetFocusedTextBox()~=miniTime then miniTime.Text=string.format("%.3f",playhead) end
-        targetLabel.Text=selected and (selected.Name.." / "..(selectedProperty or "sem canal")) or "Toque numa peça na cena"
+        targetLabel.Text=selected and ((V5.selectedPart and V5.selectedPart.Parent and V5.selectedPart.Name.." → " or "")..selected.Name.." / "..(selectedProperty or "sem canal")) or "Toque numa peça na cena"
+        targetButton.Text=({limb="Membros ▾",part="Part livre ▾",joint="Juntas ▾",rig="Rig inteiro ▾"})[V5.targetMode]
         play.Text=playing and "Pausar" or "Play";auto.Text=autoKey and "Auto On" or "Auto Off"
         auto.BackgroundColor3=autoKey and C.accent or C.field;auto.TextColor3=autoKey and C.dark or C.text
         for mode,b in pairs(W.tools) do b.BackgroundColor3=gizmoMode==mode and C.accent or C.field;b.TextColor3=gizmoMode==mode and C.dark or C.text end
         dockStatus.Text=string.format("%s • %s • %s • Explorer: %s",V5.targetMode,V5.space,V5.locked and "travado" or "livre",W.external)
         if V5.dirty then miniRefresh() end
         if os.clock()-W.lastPoll<.15 then return end;W.lastPoll=os.clock()
-        if V5.busy or V5.drag or playing or V5.locked then return end
+        if V5.busy or V5.drag or playing or V5.locked or V5.camera.active then return end
         local ok,err=pcall(function()
             local target
             if W.provider then
