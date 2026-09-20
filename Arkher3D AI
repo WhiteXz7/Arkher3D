@@ -1596,10 +1596,17 @@ local BUDGET = 3000  -- limite de parts por modelo
 -- IA DIRETO NO SCRIPT (OpenAI-compatible: Puter, OpenRouter, Groq...)
 -- ============================================================
 local AI_STATE_NAME = "Roblox3D_AI_State"
+-- PADRAO = ponte local. A conta Puter FREE bloqueia IA por token (HTTP 402),
+-- entao o caminho que funciona e o server local + aba /puter (puter.js).
 local AI_DEFAULTS = {
-    base = "https://api.puter.com/puterai/openai/v1",
+    base = "http://127.0.0.1:8787",
     key = "",
-    model = "anthropic:anthropic/claude-sonnet-5",
+    model = "auto",
+}
+-- enderecos testados automaticamente ate achar a ponte no ar
+local BRIDGE_CANDIDATES = {
+    "http://127.0.0.1:8787",
+    "http://localhost:8787",
 }
 
 local function loadCfg()
@@ -1684,7 +1691,52 @@ local function scene2v2(data)
     if not out then return nil, err end
     return out
 end
+-- Detecta automaticamente se a URL e uma PONTE local (server Roblox3D).
+-- Na ponte o endpoint e /v2/llm e NAO precisa de token: quem fala com a IA
+-- e a aba do navegador (puter.js), que nao cai no 402 de subscription.
+local function isBridge(base)
+    local b = tostring(base or ""):lower()
+    if b:find("/puterai", 1, true) then return false end
+    if b:find("api.puter.com", 1, true) then return false end
+    return b:find("127%.0%.0%.1") or b:find("localhost") or b:find("^https?://%d+%.%d+%.%d+%.%d+")
+        or b:find("%.e2b%.app") or b:find("/v2$") or b:find("ngrok")
+end
+
+local function callBridge(cfg, systemPrompt, userPrompt, maxTokens)
+    local base = tostring(cfg.base):gsub("/+$", "")
+    base = base:gsub("/v2$", "")
+    local req = {
+        Url = base .. "/v2/llm",
+        Method = "POST",
+        Headers = { ["Content-Type"] = "application/json" },
+        Body = HttpService:JSONEncode({
+            system = systemPrompt or SYSTEM_PROMPT,
+            user = userPrompt,
+            max_tokens = maxTokens or 8192,
+        }),
+    }
+    local ok, resp = pcall(function() return HttpService:RequestAsync(req) end)
+    if not ok or type(resp) ~= "table" then
+        return nil, "nao consegui falar com a ponte em " .. base ..
+            " (o server esta rodando?). Detalhe: " .. tostring(resp):sub(1, 100)
+    end
+    local okd, data = pcall(function() return HttpService:JSONDecode(resp.Body) end)
+    if not okd or type(data) ~= "table" then
+        return nil, "resposta invalida da ponte: " .. tostring(resp.Body):sub(1, 120)
+    end
+    if not data.ok then
+        return nil, tostring(data.message or data.error or "a ponte recusou")
+    end
+    if not data.text or #tostring(data.text) < 2 then
+        return nil, "a ponte devolveu vazio - a aba /puter esta aberta e LIGADA?"
+    end
+    return data.text
+end
+
 local function callLLM(cfg, systemPrompt, userPrompt, maxTokens)
+    if isBridge(cfg.base) then
+        return callBridge(cfg, systemPrompt, userPrompt, maxTokens)
+    end
     local req = {
         Url = cfg.base .. "/chat/completions",
         Method = "POST",
@@ -1711,6 +1763,11 @@ local function callLLM(cfg, systemPrompt, userPrompt, maxTokens)
         local okd, dd = pcall(function() return HttpService:JSONDecode(resp.Body) end)
         if okd and type(dd) == "table" and dd.error then
             detail = tostring(dd.error.message or dd.error)
+        end
+        if resp.StatusCode == 402 then
+            return nil, "HTTP 402 — a conta Puter FREE nao libera IA por token. " ..
+                "Use a PONTE: rode o server e coloque no campo URL (⚙) o endereco dele " ..
+                "(ex.: http://127.0.0.1:8787). Ai a IA passa pela aba /puter e funciona."
         end
         return nil, "HTTP " .. tostring(resp.StatusCode) .. " — " .. detail:sub(1, 150) .. "  (verifique token/modelo/URL no ⚙)"
     end
@@ -1766,6 +1823,22 @@ local function fetchModels(cfg)
     table.sort(out)
     modelCache = out
     return out
+end
+
+-- procura uma ponte no ar (GET /health -> {"ponte": true})
+local function findBridge()
+    for _, base in ipairs(BRIDGE_CANDIDATES) do
+        local ok, body = pcall(function()
+            return HttpService:GetAsync(base .. "/health")
+        end)
+        if ok and body then
+            local okd, d = pcall(function() return HttpService:JSONDecode(body) end)
+            if okd and type(d) == "table" and d.ok then
+                return base, (d.ponte == true)
+            end
+        end
+    end
+    return nil
 end
 
 local function validateLLM(cfg)
@@ -2236,8 +2309,8 @@ local function setupGui(player)
     end
 
     setupLabel("🔑 Ativar a IA (uma vez só)", 6, 18, 13, Color3.fromRGB(240, 243, 250))
-    setupLabel("1) conta grátis em puter.com\n2) dashboard → \"Create token\"\n3) cole o token abaixo", 27, 38, 11, Color3.fromRGB(160, 168, 185))
-    local keyField = setupField("token (puter.com/dashboard → Create token)", 69, aiCfg.key)
+    setupLabel("MODO PONTE (recomendado): deixe o token VAZIO,\nrode o server e toque em Ativar — eu acho sozinho.\nA conta Puter free bloqueia token direto (erro 402).", 27, 38, 11, Color3.fromRGB(160, 168, 185))
+    local keyField = setupField("token — DEIXE VAZIO para usar a ponte", 69, aiCfg.key)
     local modelField = setupField("modelo — digite pra filtrar (ex.: claude, gpt, grok)", 99, aiCfg.model)
     local pickBtn = Instance.new("TextButton")
     pickBtn.Size = UDim2.new(1, -20, 0, 24)
@@ -2250,7 +2323,7 @@ local function setupGui(player)
     makeCorner(pickBtn, 7)
     pickBtn.Parent = setupBox
 
-    local baseField = setupField("URL da API — Puter já vem; Groq: https://api.groq.com/openai/v1", 159, aiCfg.base)
+    local baseField = setupField("URL do server/ponte (ex.: http://127.0.0.1:8787)", 159, aiCfg.base)
     local connectBtn = Instance.new("TextButton")
     connectBtn.Size = UDim2.new(1, -20, 0, 28)
     connectBtn.Position = UDim2.new(0, 10, 0, 193)
@@ -2659,8 +2732,29 @@ local function setupGui(player)
         local key = keyField.Text:match("^%s*(.-)%s*$")
         local model = modelField.Text:match("^%s*(.-)%s*$")
         local base = baseField.Text:match("^%s*(.-)%s*$")
+        -- modo PONTE: nao precisa de token (quem autentica e a aba /puter)
+        if key == "" and (base == "" or isBridge(base)) then
+            setupErr.Text = "procurando a ponte..."
+            task.spawn(function()
+                local found, ligada = findBridge()
+                if found then
+                    saveCfg({key = "", model = "auto", base = found})
+                    setupErr.Text = ""
+                    refreshStatus()
+                    hideSetup()
+                    if ligada then
+                        addMsg("✅ Ponte encontrada em " .. found .. " — IA pronta! Pode pedir.", Color3.fromRGB(140, 230, 170))
+                    else
+                        addMsg("⚠️ Server achado em " .. found .. ", mas a PONTE esta DESLIGADA.\nAbra " .. found .. "/puter no navegador, cole o token do Puter e toque em LIGAR (modo AUTO).", Color3.fromRGB(250, 200, 90))
+                    end
+                else
+                    setupErr.Text = "ponte nao encontrada — rode o server e tente de novo"
+                end
+            end)
+            return
+        end
         if key == "" then
-            setupErr.Text = "cole o token primeiro 🙂"
+            setupErr.Text = "cole o token, ou deixe vazio p/ usar a ponte local"
             return
         end
         local cfg = {
