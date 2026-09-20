@@ -1978,13 +1978,13 @@ local building = false
 
 local MAT_TO_TEX = {
     [Enum.Material.Wood] = "madeira",
-    [Enum.Material.Slate] = "pedra", [Enum.Material.Granite] = "pedra",
+    [Enum.Material.Granite] = "pedra",
     [Enum.Material.Concrete] = "pedra", [Enum.Material.Basalt] = "basalto",
     [Enum.Material.Brick] = "tijolo",
     [Enum.Material.Marble] = "marmore",
     [Enum.Material.Metal] = "metal", [Enum.Material.CorrodedMetal] = "metal_escuro",
     [Enum.Material.Grass] = "grama", [Enum.Material.Sand] = "areia",
-    [Enum.Material.Foliage] = "folha", [Enum.Material.Fabric] = "lona",
+    [Enum.Material.Fabric] = "lona",
     [Enum.Material.Leather] = "couro", [Enum.Material.Ice] = "gelo",
     [Enum.Material.Water] = "agua",
 }
