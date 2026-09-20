@@ -1983,7 +1983,6 @@ local MAT_TO_TEX = {
     [Enum.Material.Brick] = "tijolo",
     [Enum.Material.Marble] = "marmore",
     [Enum.Material.Metal] = "metal", [Enum.Material.CorrodedMetal] = "metal_escuro",
-    [Enum.Material.Gold] = "dourado", [Enum.Material.Silver] = "prata",
     [Enum.Material.Grass] = "grama", [Enum.Material.Sand] = "areia",
     [Enum.Material.Foliage] = "folha", [Enum.Material.Fabric] = "lona",
     [Enum.Material.Leather] = "couro", [Enum.Material.Ice] = "gelo",
