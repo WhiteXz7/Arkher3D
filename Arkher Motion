@@ -367,6 +367,18 @@ function Snake.validate(project)
 assert(type(project)=="table" and (project.version==1 or project.version==2 or project.version==3 or project.version==4 or project.version==5 or project.version==6),"Versao de projeto invalida")
 assert(type(project.duration)=="number" and project.duration>0 and project.duration<=600,"Duracao: 0.01 a 600 segundos")
 assert(type(project.tracks)=="table" and #project.tracks<=512,"Limite: 512 faixas")
+if project.editor~=nil then
+assert(type(project.editor)=="table","Metadados de edição inválidos")
+local meta=project.editor
+if meta.rig then
+assert(type(meta.rig)=="table" and type(meta.rig.root)=="string" and type(meta.rig.path)=="table" and #meta.rig.path<=64,"Contexto de rig inválido")
+for _,segment in ipairs(meta.rig.path) do assert(type(segment)=="table" and type(segment.name)=="string" and type(segment.class)=="string","Caminho do rig inválido") end
+end
+if meta.archivedTracks then
+assert(type(meta.archivedTracks)=="table" and #meta.archivedTracks<=512,"Arquivo de faixas inválido")
+Snake.validate({version=6,duration=project.duration,tracks=meta.archivedTracks})
+end
+end
 local scales={}
 local function ancestor(a,b)
 if a.root~=b.root or a.userId~=b.userId or #a.path>#b.path then return false end
@@ -1264,6 +1276,18 @@ function Snake.validate(project)
     assert(type(project)=="table" and (project.version==1 or project.version==2 or project.version==3 or project.version==4 or project.version==5 or project.version==6),"Versao de projeto invalida")
     assert(type(project.duration)=="number" and project.duration>0 and project.duration<=600,"Duracao: 0.01 a 600 segundos")
     assert(type(project.tracks)=="table" and #project.tracks<=512,"Limite: 512 faixas")
+    if project.editor~=nil then
+        assert(type(project.editor)=="table","Metadados de edição inválidos")
+        local meta=project.editor
+        if meta.rig then
+            assert(type(meta.rig)=="table" and type(meta.rig.root)=="string" and type(meta.rig.path)=="table" and #meta.rig.path<=64,"Contexto de rig inválido")
+            for _,segment in ipairs(meta.rig.path) do assert(type(segment)=="table" and type(segment.name)=="string" and type(segment.class)=="string","Caminho do rig inválido") end
+        end
+        if meta.archivedTracks then
+            assert(type(meta.archivedTracks)=="table" and #meta.archivedTracks<=512,"Arquivo de faixas inválido")
+            Snake.validate({version=6,duration=project.duration,tracks=meta.archivedTracks})
+        end
+    end
     local scales={}
     local function ancestor(a,b)
         if a.root~=b.root or a.userId~=b.userId or #a.path>#b.path then return false end
@@ -2201,8 +2225,8 @@ local player=Players.LocalPlayer
 local playerGui=player:WaitForChild("PlayerGui")
 if playerGui:FindFirstChild("SnakeAnimator") then playerGui.SnakeAnimator:Destroy() end
 
-local C={bg=Color3.fromRGB(13,16,24),panel=Color3.fromRGB(24,29,43),field=Color3.fromRGB(34,43,60),line=Color3.fromRGB(49,65,78),text=Color3.fromRGB(231,239,242),muted=Color3.fromRGB(157,177,185),accent=Color3.fromRGB(103,226,187),dark=Color3.fromRGB(10,39,27),warn=Color3.fromRGB(255,190,121)}
-local V5={active=false,world=true,locked=false,targetMode="limb",space="local",uniform=false,opposite=false,snap=false,moveStep=.1,angleStep=5,scaleStep=.1,compact=true,filter="",dirty=true}
+local C={bg=Color3.fromRGB(14,17,24),panel=Color3.fromRGB(23,28,39),field=Color3.fromRGB(33,40,55),line=Color3.fromRGB(71,83,105),text=Color3.fromRGB(241,245,252),muted=Color3.fromRGB(172,187,208),accent=Color3.fromRGB(127,222,212),dark=Color3.fromRGB(9,31,37),warn=Color3.fromRGB(255,199,133)}
+local V5={timelineScope="scene",protectFloor=true,active=false,world=true,locked=false,targetMode="limb",space="local",uniform=false,opposite=false,snap=false,moveStep=.1,angleStep=5,scaleStep=.1,compact=true,filter="",dirty=true}
 local alive=true
 local connections={}
 local connectionCount=0
@@ -2229,6 +2253,7 @@ end
 local function button(parent,text,pos,size,fn,accent)
     local b=make("TextButton",parent,{Text=text,Position=pos,Size=size,BackgroundColor3=accent and C.accent or C.field,TextColor3=accent and C.dark or C.text,Font=Enum.Font.GothamMedium,TextSize=13,BorderSizePixel=0,AutoButtonColor=true})
     corner(b)
+    b.Selectable=true
     if fn then connect(b.Activated,fn) end
     b.TextWrapped=true;make("UIStroke",b,{Color=C.line,Thickness=1,Transparency=.65})
     return b
@@ -2277,7 +2302,7 @@ local function showPage(name)
     for key,p in pairs(pages) do p.Visible=key==name end
     for key,b in pairs(tabButtons) do b.BackgroundColor3=key==name and C.accent or C.field;b.TextColor3=key==name and C.dark or C.text end
 end
-for i,name in ipairs({"Cena","Pose","Motion","Cutscene","Timeline","Exportar"}) do
+for i,name in ipairs({"Rig","Cena","Pose","Motion","Cutscene","Timeline","Exportar"}) do
     local tab=name
     tabButtons[name]=button(window,name,UDim2.new((i-1)/6,5,0,54),UDim2.new(1/6,-7,0,32),function() showPage(tab) end)
     tabButtons[name].TextScaled=true;make("UITextSizeConstraint",tabButtons[name],{MinTextSize=10,MaxTextSize=13})
@@ -2308,18 +2333,25 @@ local fieldKind=nil
 local choiceOverlay=nil
 local function choices(title,items,onPick)
     if choiceOverlay then choiceOverlay:Destroy() end
-    choiceOverlay=frame(window,UDim2.fromOffset(6,48),UDim2.new(1,-12,1,-58),C.panel)
-    choiceOverlay.ZIndex=30;corner(choiceOverlay)
-    label(choiceOverlay,title,UDim2.fromOffset(12,8),UDim2.new(1,-62,0,28))
-    button(choiceOverlay,"×",UDim2.new(1,-42,0,6),UDim2.fromOffset(32,30),function() choiceOverlay:Destroy();choiceOverlay=nil end)
-    local list=scroll(choiceOverlay,UDim2.fromOffset(8,46),UDim2.new(1,-16,1,-54))
+    local wasVisible=window.Visible
+    local view=Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize or Vector2.new(960,700)
+    local left,top,right,bottom=12,24,view.X-12,view.Y-24
+    pcall(function() local r=game:GetService("GuiService"):GetInsetArea(Enum.ScreenInsets.DeviceSafeInsets);left=math.max(left,r.Min.X+12);right=math.min(right,r.Max.X-12);top=math.max(top,r.Min.Y+12);bottom=math.min(bottom,r.Max.Y-12) end)
+    local h=math.min(math.max(190,62+#items*52),bottom-top)
+    choiceOverlay=frame(gui,UDim2.fromOffset((left+right)/2,(top+bottom)/2),UDim2.fromOffset(math.min(520,right-left),h),C.panel)
+    choiceOverlay.Name="SnakeActionSheet";choiceOverlay.AnchorPoint=Vector2.new(.5,.5);choiceOverlay.ZIndex=100;choiceOverlay.Active=true;corner(choiceOverlay,12)
+    local heading=label(choiceOverlay,title,UDim2.fromOffset(16,8),UDim2.new(1,-78,0,40));heading.TextSize=15
+    button(choiceOverlay,"×",UDim2.new(1,-56,0,8),UDim2.fromOffset(44,40),function() choiceOverlay:Destroy();choiceOverlay=nil;window.Visible=wasVisible;if V5.layout then V5.layout() end end)
+    local list=scroll(choiceOverlay,UDim2.fromOffset(10,58),UDim2.new(1,-20,1,-68))
     for i,item in ipairs(items) do
-        button(list,item.label or tostring(item),UDim2.fromOffset(4,(i-1)*38),UDim2.new(1,-12,0,32),safe(function()
+        button(list,item.label or tostring(item),UDim2.fromOffset(2,(i-1)*52),UDim2.new(1,-10,0,44),safe(function()
             local value=item.value or item
-            choiceOverlay:Destroy();choiceOverlay=nil;onPick(value)
+            choiceOverlay:Destroy();choiceOverlay=nil;window.Visible=wasVisible
+            onPick(value);if V5.layout then V5.layout() end
         end))
     end
 end
+
 local function clone(t)
     if type(t)~="table" then return t end
     local c={};for k,v in pairs(t) do c[k]=clone(v) end;return c
@@ -2330,6 +2362,7 @@ local function snapshot(keepBodyBake)
     local units=0
     for _,tr in ipairs(project.tracks) do units=units+#tr.keys end
     for _,pose in ipairs(project.poses or {}) do units=units+#pose.entries end
+    if type(project.editor)=="table" and type(project.editor.archivedTracks)=="table" then for _,tr in ipairs(project.editor.archivedTracks) do units=units+#tr.keys end end
     if project.body then
         for _,src in ipairs(project.body.sources or {}) do units=units+#src.keys end
         for _,e in ipairs(project.body.effectors) do for _,channel in ipairs({"keys","poles","rotations","weights"}) do units=units+#e[channel] end end
@@ -2471,6 +2504,7 @@ connect(durationBox.FocusLost,safe(function()
     local d=tonumber(durationBox.Text);assert(d and d>=.01 and d<=600,"Duração: 0.01 a 600 segundos")
     local last=0
     for _,tr in ipairs(project.tracks) do for _,k in ipairs(tr.keys) do last=math.max(last,k.t) end end
+    if type(project.editor)=="table" then for _,tr in ipairs(project.editor.archivedTracks or {}) do for _,k in ipairs(tr.keys) do last=math.max(last,k.t) end end end
     if project.body then
         for _,e in ipairs(project.body.effectors) do
             for _,channel in ipairs({"keys","poles","rotations","weights"}) do for _,k in ipairs(e[channel]) do last=math.max(last,k.t) end end
@@ -2550,7 +2584,9 @@ end
 local gizmoProxy
 local selectionBox=make("SelectionBox",Workspace,{Name="SnakeSelection",Color3=C.accent,LineThickness=.035,SurfaceTransparency=1})
 local function selectObject(obj,prop,stay)
+    if V5.rig then obj=V5.rig.map(obj,prop);if not obj then return false end end
     selected=obj
+    V5.selectedPart=obj:IsA("BasePart") and obj or obj:IsA("JointInstance") and obj.Part1 or obj:IsA("Model") and V5.selectedPart and V5.selectedPart:IsDescendantOf(obj) and V5.selectedPart or nil
     local props=properties(obj)
     selectedProperty=prop or props[1]
     selectedTrack=selectedProperty and findTrack(obj,selectedProperty) or nil
@@ -2560,6 +2596,7 @@ local function selectObject(obj,prop,stay)
     if not stay then showPage("Pose") end
     V5.dirty=true
     notify(obj.ClassName.." selecionado. "..(#props==0 and "Abra seus filhos para encontrar alvos animáveis." or "Edite valores e grave um keyframe."))
+    return true
 end
 refreshExplorer=function()
     for _,c in ipairs(explorer:GetChildren()) do c:Destroy() end
@@ -2743,7 +2780,7 @@ local draggingKey=nil
 local scrubbing=false
 local dragInput=nil
 local function xToTime(x)
-    return snap((x-lane.AbsolutePosition.X+lane.CanvasPosition.X)/pixelsPerSecond)
+    return snap((x-lane.AbsolutePosition.X+lane.CanvasPosition.X-(V5.timeline and V5.timeline.padding or 0))/pixelsPerSecond)
 end
 local function moveKeyToTime(tr,key,t)
     for i=#tr.keys,1,-1 do
@@ -2753,6 +2790,10 @@ local function moveKeyToTime(tr,key,t)
     key.t=t;table.sort(tr.keys,function(a,b) return a.t<b.t end)
 end
 refreshTimeline=function()
+    if selected and selected.Parent and selectedProperty then
+        selectedTrack=findTrack(selected,selectedProperty)
+        if selectedKey and (not selectedTrack or not table.find(selectedTrack.keys,selectedKey)) then selectedKey=nil end
+    end
     for _,c in ipairs(trackList:GetChildren()) do c:Destroy() end
     for _,c in ipairs(lane:GetChildren()) do if c~=ruler and c~=playLine then c:Destroy() end end
     for _,c in ipairs(ruler:GetChildren()) do c:Destroy() end
@@ -2760,7 +2801,7 @@ refreshTimeline=function()
     local height=math.max(80,#project.tracks*42+32)
     lane.CanvasSize=UDim2.fromOffset(width+24,height)
     ruler.Size=UDim2.fromOffset(width+24,30)
-    playLine.Size=UDim2.fromOffset(2,height);playLine.Position=UDim2.fromOffset(playhead*pixelsPerSecond,0)
+    playLine.Size=UDim2.fromOffset(2,height);playLine.Position=UDim2.fromOffset((V5.timeline and V5.timeline.padding or 0)+playhead*pixelsPerSecond,0)
     local tick=math.max(1,math.ceil(project.duration/80))
     for t=0,project.duration,tick do
         label(ruler,t.."s",UDim2.fromOffset(t*pixelsPerSecond+3,0),UDim2.fromOffset(45,26),true)
@@ -2795,7 +2836,7 @@ refreshTimeline=function()
     end
     end
     height=math.max(80,shown*42+32);lane.CanvasSize=UDim2.fromOffset(width+24,height);playLine.Size=UDim2.fromOffset(2,height)
-    timelineInfo.Text=string.format("%d faixas  ·  %.3fs / %.2fs  ·  arraste ◆ para mover",#project.tracks,playhead,project.duration)
+    timelineInfo.Text=V5.timeline and V5.timeline.summary or string.format("%d faixas  ·  %.3fs / %.2fs",#project.tracks,playhead,project.duration)
     V5.dirty=true
     if advancedHooks.tracksChanged then advancedHooks.tracksChanged() end
 end
@@ -2860,9 +2901,10 @@ local function projectJSON(playback)
     project.version=6
     local data=project
     if playback then
-        if project.body and #project.body.effectors>0 then assert(project.body.baked==true,"Body bake pendente. Use Motion → Corpo → Bake corporal antes de exportar") end
+        if project.body and #project.body.effectors>0 and (not V5.rig or V5.rig.exportMode~="rig" or V5.rig.matches(project.body.rig)) then assert(project.body.baked==true,"Body bake pendente. Use Motion → Corpo → Bake corporal antes de exportar") end
         data={version=6,name=project.name,duration=project.duration,fps=project.fps,loop=project.loop,tracks=project.tracks,cinema=project.cinema}
     end
+    if playback and V5.rig then data=V5.rig.playback(data) end
     return HttpService:JSONEncode(data)
 end
 local function output(text,hint)
@@ -3030,7 +3072,7 @@ local function installTransformGizmos()
             local part=V5.selectedPart
             if V5.targetMode=="limb" and part and part.Parent and (selected==part or selected and selected:IsA("JointInstance") and selected.Part1==part) then
                 local target=mode=="scale" and part or (V5.findJoint and V5.findJoint(part) or part)
-                if target~=selected then selectObject(target,nil,true) end
+                if target~=selected then selectObject(target,target:IsA("JointInstance") and "C0" or mode=="scale" and "Size" or "CFrame",true) end
             end
             local p=property(mode)
             if p=="ModelScale" then
@@ -3128,7 +3170,7 @@ local function installTransformGizmos()
         G.finish()
     end
     function G.keyTransform()
-        assert(selected and not V5.busy and not drag,"Selecione um alvo e finalize o gesto")
+        assert(selected and not V5.busy and not drag and not playing,"Selecione um alvo, pause e finalize o gesto")
         local list
         if V5.pending and V5.pending.object==selected then list=V5.pending.properties
         elseif selected:IsA("BasePart") then list={"CFrame","Size"}
@@ -3136,6 +3178,8 @@ local function installTransformGizmos()
         else list={property(gizmoMode=="scale" and "scale" or "move")} end
         snapshot()
         for _,p in ipairs(list) do local tr=ensureTrack(selected,p);insertKey(tr,playhead,Snake.read(selected,p)) end
+        selectedTrack=selectedProperty and findTrack(selected,selectedProperty) or nil
+        if selectedTrack then for _,k in ipairs(selectedTrack.keys) do if math.abs(k.t-playhead)<1e-6 then selectedKey=k end end end
         V5.pending=nil
         refreshTimeline();notify("Key transformação: "..#list.." canais gravados juntos.")
     end
@@ -3226,9 +3270,10 @@ local function installAdvancedTools()
         if name=="Corpo" and A.body then A.body.refresh() end
         if name=="Física" and A.physics then A.physics.refresh() end
     end
+    local subNavigation=make("ScrollingFrame",motion,{Name="SnakeMotionNavigation",Position=UDim2.new(),Size=UDim2.new(1,0,0,46),CanvasSize=UDim2.fromOffset(552,0),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=3,ScrollBarImageColor3=C.accent,ScrollingDirection=Enum.ScrollingDirection.X})
     for i,name in ipairs({"Corpo","Física","IK","Curvas","Ghosts","Poses"}) do
-        subButtons[name]=button(motion,name,UDim2.new((i-1)/6,0,0,0),UDim2.new(1/6,-3,0,32),function() subTab(name) end)
-        subPages[name]=scroll(motion,UDim2.fromOffset(0,42),UDim2.new(1,0,1,-42))
+        subButtons[name]=button(subNavigation,name,UDim2.fromOffset((i-1)*92,0),UDim2.fromOffset(86,40),function() subTab(name) end)
+        subPages[name]=scroll(motion,UDim2.fromOffset(0,54),UDim2.new(1,0,1,-54))
     end
     local function content(name,height)
         return frame(subPages[name],UDim2.new(),UDim2.new(1,-7,0,height),C.bg)
@@ -4905,6 +4950,7 @@ local function installAdvancedTools()
         end
     end)
     advancedHooks.retime=function(ratio)
+        if V5.rig then V5.rig.retimeArchive(ratio) end
         if V5.cutscene then V5.cutscene.retime(ratio) end
         if A.physics then A.physics.retime(ratio) end
         local body=project.body;if not body then return end
@@ -4923,6 +4969,7 @@ refreshAll=function()
     durationBox.Text=tostring(project.duration);fpsButton.Text=project.fps.." snap";loopButton.Text=project.loop and "↻ On" or "↻ Off"
     timeBox.Text=string.format("%.3f",playhead);refreshInspector();refreshTimeline();refreshExplorer()
     if advancedHooks.projectChanged then advancedHooks.projectChanged() end
+    if V5.rig then V5.rig.restoreContext() end
 end
 local function history(redo)
     assert(not V5.busy and not V5.drag,"Finalize/cancele o gesto ou bake antes de desfazer")
@@ -4972,10 +5019,10 @@ connect(UserInputService.InputChanged,safe(function(input)
         local t=xToTime(input.Position.X)
         if draggingKey then
             if t~=draggingKey.key.t and not draggingKey.saved then snapshot();draggingKey.saved=true end
-            draggingKey.key.t=t;draggingKey.dot.Position=UDim2.new(0,t*pixelsPerSecond-10,draggingKey.dot.Position.Y.Scale,draggingKey.dot.Position.Y.Offset)
+            draggingKey.key.t=t;draggingKey.dot.Position=UDim2.new(0,(V5.timeline and V5.timeline.padding or 0)+t*pixelsPerSecond-12,draggingKey.dot.Position.Y.Scale,draggingKey.dot.Position.Y.Offset)
             table.sort(draggingKey.track.keys,function(a,b) return a.t<b.t end)
         end
-        previewAt(t,false);playLine.Position=UDim2.fromOffset(t*pixelsPerSecond,0)
+        previewAt(t,false);playLine.Position=UDim2.fromOffset((V5.timeline and V5.timeline.padding or 0)+t*pixelsPerSecond,0)
     end
 end))
 connect(UserInputService.InputEnded,safe(function(input)
@@ -5009,10 +5056,10 @@ connect(RunService.RenderStepped,function()
             previewAt(project.duration,false);playing=false;playButton.Text="▶ Play";if V5.cutscene then V5.cutscene.stopped(true) end;releaseCamera();refreshInspector()
         else previewAt(project.loop and (elapsed%project.duration) or elapsed,false) end
     end
-    playLine.Position=UDim2.fromOffset(playhead*pixelsPerSecond,0)
+    playLine.Position=UDim2.fromOffset((V5.timeline and V5.timeline.padding or 0)+playhead*pixelsPerSecond,0)
     if os.clock()-lastUpdate>.15 then
         lastUpdate=os.clock()
-        timelineInfo.Text=string.format("%d faixas  ·  %.3fs / %.2fs  ·  arraste ◆ para mover",#project.tracks,playhead,project.duration)
+        timelineInfo.Text=V5.timeline and V5.timeline.summary or string.format("%d faixas  ·  %.3fs / %.2fs",#project.tracks,playhead,project.duration)
     end
 end)
 -- Workspace V5: o mundo permanece a área principal de trabalho.
@@ -5024,7 +5071,7 @@ local function installWorkspaceUI()
     local targetLabel=label(dock,"Toque numa peça na cena",UDim2.fromOffset(10,5),UDim2.new(.7,-12,0,24));targetLabel.TextTruncate=Enum.TextTruncate.AtEnd
     local miniTime=box(dock,"0",UDim2.new(.7,0,0,5),UDim2.new(.3,-10,0,28));miniTime.PlaceholderText="Tempo da cena"
     local rulerMini=frame(dock,UDim2.fromOffset(12,80),UDim2.new(1,-24,0,38),C.bg);rulerMini.Name="SnakeScrub";rulerMini.Active=true;corner(rulerMini,6)
-    local marker=frame(rulerMini,UDim2.new(),UDim2.fromOffset(2,38),C.accent);marker.ZIndex=5
+    local marker=frame(rulerMini,UDim2.new(),UDim2.fromOffset(2,38),C.accent);marker.ZIndex=2
     local keyDots=frame(rulerMini,UDim2.new(),UDim2.fromScale(1,1),C.bg);keyDots.BackgroundTransparency=1
     local dockStatus=label(dock,"",UDim2.fromOffset(12,124),UDim2.new(1,-128,0,24),true)
     dockStatus.Name="SnakeWorkspaceStatus";dockStatus.TextWrapped=false;dockStatus.TextTruncate=Enum.TextTruncate.AtEnd
@@ -5036,7 +5083,9 @@ local function installWorkspaceUI()
         stopPreview(false);previewAt(math.clamp(t,0,project.duration),true);refreshTimeline();V5.dirty=true
     end
     local function nextKey(direction)
-        local keys=selectedTrack and selectedTrack.keys or {};local best=direction>0 and project.duration or 0
+        local keys={}
+        for _,tr in ipairs(project.tracks) do if V5.timelineScope=="scene" or V5.timelineScope=="selection" and tr==selectedTrack or V5.timelineScope=="rig" and V5.rig and V5.rig.matches(tr.target) then for _,key in ipairs(tr.keys) do keys[#keys+1]=key end end end
+        local best=direction>0 and project.duration or 0
         for _,k in ipairs(keys) do if direction>0 and k.t>playhead+1e-6 then best=math.min(best,k.t) elseif direction<0 and k.t<playhead-1e-6 then best=math.max(best,k.t) end end
         seek(best)
     end
@@ -5119,6 +5168,10 @@ local function installWorkspaceUI()
         end
         local ok,valid=pcall(function() return obj and obj.Parent and obj:IsA("Instance") and not helper(obj) end)
         if not ok or not valid then return false end
+        if V5.protectFloor and obj:IsA("BasePart") and (obj.Name:lower()=="baseplate" or obj.Locked==true) then
+            notify("Chão/objeto Locked protegido do clique acidental. Para editá-lo, use Cena livre e a seleção explícita na aba Cena.",true);return false
+        end
+        if V5.rig and not V5.rig.allow(obj) then return false end
         if obj:IsA("Model") and (V5.targetMode=="limb" or V5.targetMode=="joint") then
             if W.ignoredModel~=obj then notify("O Explorer informou o rig inteiro. Toque no braço/perna na cena; Membros não substitui a peça pelo Model.");W.ignoredModel=obj end
             return false
@@ -5127,7 +5180,7 @@ local function installWorkspaceUI()
         local target=mapTarget(obj)
         local locOK=pcall(Snake.locate,target);if not locOK then return false end
         V5.selectedPart=part;W.ignoredModel=nil
-        selectObject(target,nil,true)
+        if selectObject(target,nil,true)==false then V5.selectedPart=nil;return false end
         if gizmoMode~="off" then local success=pcall(V5.gizmo.mode,gizmoMode);if not success then gizmoMode="off";gizmoButton.Text="Gizmo: Off" end end
         V5.pending=nil;V5.dirty=true
         notify("Selecionado no "..origin..": "..(part and part.Name.." → " or "")..target.Name.." / "..tostring(selectedProperty))
@@ -5146,6 +5199,8 @@ local function installWorkspaceUI()
             if not hit then return end
             if (V5.targetMode=="limb" or V5.targetMode=="joint") and hit.Instance.Name=="HumanoidRootPart" then
                 ignore[#ignore+1]=hit.Instance
+            elseif V5.protectFloor and (hit.Instance.Name:lower()=="baseplate" or hit.Instance.Locked==true) then ignore[#ignore+1]=hit.Instance
+            elseif V5.rig and V5.rig.model and V5.rig.protect and V5.targetMode~="part" and not V5.rig.contains(hit.Instance) then ignore[#ignore+1]=hit.Instance
             else W.select(hit.Instance,"mundo");return end
         end
     end
@@ -5237,6 +5292,7 @@ local function installWorkspaceUI()
         end)
         window.Visible=true;V5.layout()
     end
+    W.options=options
     W.tools={}
     W.tools.off=buttonAt(toolbar,"Selecionar",1,6,37,function() V5.gizmo.mode("off");V5.world=true;V5.locked=false end)
     W.tools.move=buttonAt(toolbar,"W Mover",2,6,37,function() V5.gizmo.mode("move") end)
@@ -5247,6 +5303,7 @@ local function installWorkspaceUI()
     -- Painel de conexão visível na antiga aba Cena; seleção interna é apenas fallback.
     for _,o in ipairs(scene:GetChildren()) do if o:IsA("TextButton") and o.Text=="Atualizar / ver juntas" then o.Position=UDim2.new(.5,4,1,-78) end end
     button(scene,"Conectar Explorer externo",UDim2.new(.5,4,1,-38),UDim2.new(.5,-4,0,34),safe(W.connectExplorer))
+    W.ui={toolbar=toolbar,dock=dock,title=title,target=targetLabel,miniTime=miniTime,ruler=rulerMini,marker=marker,keyDots=keyDots,status=dockStatus,targetButton=targetButton}
     function V5.layout()
         local cam=Workspace.CurrentCamera;local v=cam and cam.ViewportSize or Vector2.new(960,700)
         local width,height=v.X,v.Y
@@ -5311,12 +5368,29 @@ local function installWorkspaceUI()
     end))
     local function miniRefresh()
         for _,o in ipairs(keyDots:GetChildren()) do o:Destroy() end
-        local keys=selectedTrack and selectedTrack.keys or {}
-        local stride=math.max(1,math.ceil(#keys/400))
-        for i=1,#keys,stride do
-            local k=keys[i]
-            local b=button(keyDots,"◆",UDim2.new(k.t/project.duration,-9,0,3),UDim2.fromOffset(18,30),safe(function() seek(k.t);selectedKey=k;refreshInspector() end));b.BackgroundTransparency=1;b.TextColor3=C.accent
+        local buckets={};local total=0
+        for _,tr in ipairs(project.tracks) do
+            local include=V5.timelineScope=="scene" or V5.timelineScope=="selection" and tr==selectedTrack or V5.timelineScope=="rig" and V5.rig and V5.rig.matches(tr.target)
+            if include then for _,k in ipairs(tr.keys) do
+                total=total+1
+                local bin=math.floor(k.t/project.duration*math.max(1,rulerMini.AbsoluteSize.X-32)/5+.5)
+                local entry=buckets[bin]
+                if not entry then entry={key=k,track=tr,count=0};buckets[bin]=entry end
+                entry.count=entry.count+1
+            end end
         end
+        W.overviewKeyCount=total;W.overviewMarkerCount=0
+        for _,entry in pairs(buckets) do
+            local e=entry;W.overviewMarkerCount=W.overviewMarkerCount+1
+            local b=button(keyDots,e.count>1 and "●" or "◆",UDim2.new(e.key.t/project.duration,-10+16*(1-2*e.key.t/project.duration),0,3),UDim2.fromOffset(24,32),safe(function()
+                local object=Snake.resolve(e.track.target)
+                if object and V5.rig and not V5.rig.allow(object) then return end
+                seek(e.key.t);selected=object;selectedProperty=e.track.property;selectedTrack=e.track;selectedKey=e.key
+                V5.selectedPart=object and (object:IsA("BasePart") and object or object:IsA("JointInstance") and object.Part1) or nil
+                refreshInspector();refreshTimeline()
+            end));b.Name="SnakeOverviewKey";b.ZIndex=4;b.BackgroundTransparency=1;b.TextColor3=e.track==selectedTrack and C.accent or C.text
+        end
+        if total==0 then local hint=label(keyDots,V5.timelineScope=="selection" and "Seleção sem keys • altere a visão para Cena" or "Grave sua primeira pose",UDim2.fromOffset(12,3),UDim2.new(1,-24,0,32),true);hint.Name="SnakeOverviewEmpty" end
         if project.cinema and project.cinema.enabled then
             for _,e in ipairs(project.cinema.events) do
                 local cue=e
@@ -5328,7 +5402,7 @@ local function installWorkspaceUI()
     end
     connect(RunService.RenderStepped,function()
         if not alive then return end
-        toolbar.Visible=V5.active;dock.Visible=V5.active
+        if V5.studio then V5.studio.tick() else toolbar.Visible=V5.active;dock.Visible=V5.active end
         if not V5.active then return end
         if selected and not selected.Parent then
             if V5.drag then V5.gizmo.cancel() end
@@ -5582,5 +5656,665 @@ local function installCutsceneTools()
 end
 installCutsceneTools()
 
-showPage("Pose");refreshAll();window.Visible=false
+-- Unidade de trabalho de personagem: não recria juntas nem modifica a topologia em silêncio.
+local function installRigWorkspace()
+    local R={model=nil,protect=true,exportMode="scene",clipboard=nil};V5.rig=R
+    function R.find(obj)
+        local node=obj;local candidate
+        while node and node~=Workspace do
+            if node:IsA("Model") then
+                if node:FindFirstChildOfClass("Humanoid") or node:FindFirstChildOfClass("AnimationController") then return node end
+                if node:FindFirstChildWhichIsA("Motor6D",true) or node:FindFirstChildWhichIsA("Bone",true) then candidate=candidate or node end
+            end
+            node=node.Parent
+        end
+        return candidate
+    end
+    function R.contains(obj) return R.model and obj and (obj==R.model or obj:IsDescendantOf(R.model)) end
+    function R.inspect(model)
+        local result={channels={},issues={},parts=0,loose=0,components=0};local incoming,graph,vertices={},{},{}
+        local function issue(text) result.issues[#result.issues+1]=text end
+        for _,o in ipairs(model:GetDescendants()) do
+            if o:IsA("BasePart") then result.parts=result.parts+1 end
+            if o:IsA("Motor6D") then
+                if not o.Part0 or not o.Part1 or o.Part0==o.Part1 or not o.Part0:IsDescendantOf(model) or not o.Part1:IsDescendantOf(model) then issue("Motor inválido / fora do Model: "..o.Name)
+                else
+                    result.channels[#result.channels+1]={object=o,property="C0",part=o.Part1}
+                    if incoming[o.Part1] then issue("Mais de um Motor6D controla "..o.Part1.Name) end
+                    incoming[o.Part1]=o;vertices[o.Part0]=true;vertices[o.Part1]=true
+                    graph[o.Part0]=graph[o.Part0] or {};graph[o.Part1]=graph[o.Part1] or {}
+                    table.insert(graph[o.Part0],o.Part1);table.insert(graph[o.Part1],o.Part0)
+                    if o.Part1.Anchored then issue("Membro ancorado pode impedir a junta: "..o.Part1.Name) end
+                end
+            elseif o:IsA("Bone") then result.channels[#result.channels+1]={object=o,property="Transform",part=o} end
+        end
+        local visited={}
+        for part in pairs(vertices) do if not visited[part] then
+            result.components=result.components+1;local stack={part};visited[part]=true
+            while #stack>0 do local p=table.remove(stack);for _,q in ipairs(graph[p] or {}) do if not visited[q] then visited[q]=true;stack[#stack+1]=q end end end
+        end end
+        local cycle=false
+        for part in pairs(incoming) do
+            local chain={};local p=part
+            while incoming[p] do if chain[p] then cycle=true;break end;chain[p]=true;p=incoming[p].Part0 end
+        end
+        if cycle then issue("Ciclo de Motor6D: revise a hierarquia antes de animar") end
+        if result.components>1 then issue(result.components.." grupos de Motor6D sem ligação entre si") end
+        for _,o in ipairs(model:GetDescendants()) do if o:IsA("BasePart") and not vertices[o] and not o:FindFirstChildWhichIsA("Bone",true) then result.loose=result.loose+1 end end
+        if result.loose>0 then issue(result.loose.." Parts sem participação na cadeia Motor6D (podem ser acessórios soldados ou peças soltas)") end
+        if #result.channels==0 then issue("Sem Motor6D/Bone animável. Um Model de Parts não é automaticamente um rig") end
+        table.sort(result.channels,function(a,b) return a.object:GetFullName()<b.object:GetFullName() end)
+        return result
+    end
+    function R.set(model,quiet)
+        assert(model and model:IsA("Model") and model:IsDescendantOf(Workspace),"Selecione um Model de personagem no Workspace")
+        assert(not V5.drag and not V5.busy and not playing,"Finalize o gesto / pause antes de trocar de rig")
+        R.model=model;R.protect=true;R.data=R.inspect(model)
+        if type(project.editor)~="table" then project.editor={} end;project.editor.rig=Snake.locate(model)
+        if not quiet then V5.targetMode="limb" end;V5.filter="";V5.trackSearch.Text="";V5.dirty=true
+        if not quiet then
+            V5.gizmo.mode("off");V5.pending=nil
+            if not R.contains(selected) or not (selected:IsA("Motor6D") or selected:IsA("Bone")) then
+                selected=nil;selectedProperty=nil;selectedTrack=nil;selectedKey=nil;V5.selectedPart=nil;selectionBox.Adornee=nil
+                local first=R.data.channels[1]
+                if first then V5.selectedPart=first.object:IsA("Motor6D") and first.object.Part1 or nil;selectObject(first.object,first.property,true) end
+            end
+            refreshInspector();refreshTimeline()
+        end
+        if R.refresh then R.refresh() end
+        if not quiet then notify("Rig ativo: "..model.Name.." • "..#R.data.channels.." juntas/Bones. A seleção no mundo fica restrita a ele.") end
+    end
+    function R.allow(obj)
+        if not R.protect or not R.model or V5.targetMode=="part" then return true end
+        if obj:IsA("BasePart") or obj:IsA("Model") or obj:IsA("JointInstance") or obj:IsA("Bone") then
+            if not R.contains(obj) then notify("Rig protegido: "..R.model.Name..". Use Cena livre ou Trocar rig para editar outro alvo.",true);return false end
+        end
+        return true
+    end
+    function R.map(obj,prop)
+        if not R.allow(obj) then return nil end
+        if not prop and obj:IsA("BasePart") and (V5.targetMode=="limb" or V5.targetMode=="joint") then
+            V5.selectedPart=obj
+            local rig=R.find(obj);local joint=V5.findJoint(obj)
+            if joint and (gizmoMode~="scale" or V5.targetMode=="joint") then
+                if not R.model then R.set(rig,true) end
+                return joint
+            end
+            if (rig or V5.targetMode=="joint") and not joint then
+                notify("Esta peça não tem Motor6D de entrada. Use Rig inteiro para a raiz; verifique peças soltas na aba Rig.",true);return nil
+            end
+        elseif obj:IsA("Motor6D") or obj:IsA("Bone") then
+            local rig=R.find(obj);if rig and not R.model then R.set(rig,true) end
+        end
+        return obj
+    end
+    function R.clear()
+        assert(not V5.drag and not V5.busy and not playing,"Finalize o gesto / pause")
+        R.model=nil;R.data=nil;R.exportMode="scene";R.protect=false
+        if type(project.editor)=="table" then project.editor.rig=nil end
+        V5.targetMode="part";V5.dirty=true;R.refresh()
+        notify("Cena livre: você pode animar objetos independentes. Baseplate/Locked continuam protegidos do clique acidental no mundo.")
+    end
+    function R.choose()
+        assert(not V5.drag and not V5.busy and not playing,"Finalize o gesto / pause")
+        local items,seen={},{}
+        for _,o in ipairs(Workspace:GetDescendants()) do
+            if (o:IsA("Motor6D") or o:IsA("Bone") or o:IsA("Humanoid") or o:IsA("AnimationController")) and not o:GetAttribute("SnakeEditorVisual") then
+                local model=R.find(o)
+                if model and not seen[model] and not model:GetAttribute("SnakeEditorVisual") then seen[model]=true;items[#items+1]={label=model:GetFullName(),value=model} end
+            end
+        end
+        table.sort(items,function(a,b) return a.label<b.label end)
+        assert(#items>0,"Nenhum rig identificado. Selecione o Model em Cena e use Usar Model selecionado para diagnosticar")
+        choices("Escolha o personagem • não altera suas juntas",items,function(model) R.set(model);showPage("Rig");window.Visible=true;V5.layout() end)
+        window.Visible=true;V5.layout()
+    end
+    function R.ready()
+        assert(R.model and R.model.Parent,"Escolha um rig na aba Rig")
+        assert(not playing and not V5.busy and not V5.drag,"Pause e finalize o gesto antes de gravar")
+        local data=R.inspect(R.model);assert(#data.channels>0,"Nenhuma junta válida: consulte Diagnóstico do rig")
+        if project.body and Snake.resolve(project.body.rig)==R.model and #project.body.effectors>0 then error("Para gravar uma pose FK completa, finalize Corpo em FK; ou use os controles e Bake corporal do modo Corpo") end
+        return data.channels
+    end
+    local function commit(values)
+        local missing,total=0,0
+        for _,tr in ipairs(project.tracks) do total=total+#tr.keys end
+        for _,v in ipairs(values) do
+            local tr=findTrack(v.object,v.property)
+            if not tr then missing=missing+1 else assert(#tr.keys<10000,"Limite de keys na faixa") end
+        end
+        assert(#project.tracks+missing<=512 and total+#values<=30000,"A pose excede o limite de faixas/keys")
+        local before=clone(project);local oldUndo=table.clone(undoStack);local oldRedo=table.clone(redoStack);local oldRevision=projectRevision
+        snapshot()
+        local ok,err=pcall(function()
+            for _,v in ipairs(values) do
+                local tr=ensureTrack(v.object,v.property);insertKey(tr,playhead,v.value)
+                if v.object==selected and v.property==selectedProperty then selectedTrack=tr end
+            end
+            Snake.validate(project)
+        end)
+        if not ok then project=before;undoStack=oldUndo;redoStack=oldRedo;projectRevision=oldRevision;rebuild();refreshAll();error(err) end
+        V5.pending=nil;rebuild();refreshTimeline();R.refresh()
+        notify("Pose completa gravada: "..#values.." canais do rig em "..string.format("%.3fs",playhead)..". Exportar rig reúne todas essas faixas.")
+    end
+    function R.keyPose()
+        local channels=R.ready();local values={}
+        for _,v in ipairs(channels) do values[#values+1]={object=v.object,property=v.property,value=Snake.read(v.object,v.property)} end
+        commit(values)
+    end
+    function R.copyPose()
+        local channels=R.ready();R.clipboard={model=R.model,values={}}
+        for _,v in ipairs(channels) do R.clipboard.values[#R.clipboard.values+1]={object=v.object,property=v.property,value=Snake.read(v.object,v.property)} end
+        notify("Pose completa copiada. Mude o tempo e use Colar pose + key no mesmo rig.")
+    end
+    function R.pastePose()
+        R.ready();assert(R.clipboard and R.clipboard.model==R.model,"Copie uma pose deste rig primeiro")
+        for _,v in ipairs(R.clipboard.values) do assert(v.object.Parent and R.contains(v.object),"Junta da pose copiada foi removida") end
+        commit(R.clipboard.values);previewAt(playhead,true)
+    end
+    function R.sameTarget(a,b)
+        if a.root~=b.root or a.userId~=b.userId or #a.path~=#b.path then return false end
+        for i,seg in ipairs(a.path) do local other=b.path[i];if seg.name~=other.name or seg.class~=other.class or (seg.index or 1)~=(other.index or 1) then return false end end
+        return true
+    end
+    function R.matches(target)
+        if not R.model or not R.model.Parent or type(target)~="table" or type(target.path)~="table" then return false end
+        local base=Snake.locate(R.model)
+        if target.root~=base.root or target.userId~=base.userId or #target.path<#base.path then return false end
+        for i,seg in ipairs(base.path) do local other=target.path[i];if other.name~=seg.name or other.class~=seg.class or (other.index or 1)~=(seg.index or 1) then return false end end
+        return true
+    end
+    function R.tracks()
+        local list={}
+        for _,tr in ipairs(project.tracks) do if R.matches(tr.target) then list[#list+1]=tr end end
+        return list
+    end
+    function R.playback(source)
+        if R.exportMode~="rig" then return source end
+        assert(R.model and R.model.Parent,"Escolha um rig para exportar")
+        local data={version=6,name=source.name.." / "..R.model.Name,duration=source.duration,fps=source.fps,loop=source.loop,tracks=R.tracks()}
+        assert(#data.tracks>0,"Rig sem faixas: grave uma pose ou anime suas juntas")
+        Snake.validate(data);return data
+    end
+    function R.archiveMemberTracks()
+        assert(R.model and not playing and not V5.drag and not V5.busy,"Escolha o rig, pause e finalize o gesto")
+        local candidates={}
+        for _,tr in ipairs(R.tracks()) do local obj=Snake.resolve(tr.target)
+            if obj and obj:IsA("BasePart") and tr.property=="CFrame" and V5.findJoint(obj) then candidates[#candidates+1]=tr end
+        end
+        assert(#candidates>0,"Não há faixas Part.CFrame em membros conectados deste rig")
+        choices("Revisar "..#candidates.." CFrame de membros • não converte para C0",{
+            {label="Arquivar essas faixas (preservar no JSON editável)",value="archive"},
+            {label="Manter como estão / cancelar",value="cancel"}},function(value)
+            if value~="archive" then return end
+            assert(not playing and not V5.drag and not V5.busy,"Pause / finalize o gesto")
+            local archive=project.editor.archivedTracks or {}
+            assert(type(archive)=="table" and #archive+#candidates<=512,"Limite de faixas arquivadas")
+            snapshot();project.editor.archivedTracks=archive
+            for _,tr in ipairs(candidates) do
+                local index=table.find(project.tracks,tr)
+                if index then archive[#archive+1]=table.remove(project.tracks,index) end
+            end
+            rebuild();refreshTimeline();R.refresh()
+            notify("CFrame de membros arquivadas, não convertidas. Confira a pose e grave pelas juntas. Isso pode remover compensação de escala com face oposta; Undo ou Restaurar recupera as faixas.",true)
+        end)
+    end
+    function R.restoreArchive()
+        assert(R.model and not playing and not V5.drag and not V5.busy,"Escolha o rig, pause e finalize o gesto")
+        local archive=project.editor and project.editor.archivedTracks or {};local restore={}
+        for i,tr in ipairs(archive) do if R.matches(tr.target) then restore[#restore+1]={index=i,track=tr} end end
+        assert(#restore>0,"Nenhuma faixa arquivada deste rig")
+        local candidate=clone(project)
+        for _,entry in ipairs(restore) do
+            for _,tr in ipairs(project.tracks) do assert(not R.sameTarget(tr.target,entry.track.target) or tr.property~=entry.track.property,"Já existe uma faixa desse alvo/propriedade; não será sobrescrita") end
+            candidate.tracks[#candidate.tracks+1]=clone(entry.track)
+        end
+        Snake.validate(candidate)
+        snapshot()
+        for i=#restore,1,-1 do table.insert(project.tracks,table.remove(project.editor.archivedTracks,restore[i].index)) end
+        rebuild();refreshTimeline();R.refresh();notify("Faixas restauradas. Confira se não disputam as juntas do rig.")
+    end
+    function R.retimeArchive(ratio)
+        local archive=type(project.editor)=="table" and project.editor.archivedTracks or nil
+        for _,tr in ipairs(type(archive)=="table" and archive or {}) do for _,key in ipairs(tr.keys) do
+            key.t=key.t*ratio
+            for _,field in ipairs({"inTangent","outTangent"}) do if key[field] then key[field]=Snake.pack(Snake.unpack(key[field])/ratio) end end
+        end end
+    end
+    function R.diagnostic()
+        assert(R.model and R.model.Parent,"Escolha um rig")
+        local d=R.inspect(R.model);local lines={"SNAKE ANIMATOR V1 • "..R.model:GetFullName(),#d.channels.." juntas/Bones animáveis | "..d.parts.." Parts | "..#R.tracks().." faixas gravadas",""}
+        for _,issue in ipairs(d.issues) do lines[#lines+1]="ATENÇÃO: "..issue end
+        if #d.issues==0 then lines[#lines+1]="Não foram encontrados os problemas estruturais verificados por este diagnóstico." end
+        for _,tr in ipairs(R.tracks()) do local obj=Snake.resolve(tr.target);if not obj then lines[#lines+1]="Alvo ausente (faixa preservada no export): "..tr.label end;if obj and obj:IsA("BasePart") and tr.property=="CFrame" and V5.findJoint(obj) then lines[#lines+1]="Faixa antiga em CFrame de membro: "..tr.label..". Pode disputar a junta; não foi convertida automaticamente." end end
+        lines[#lines+1]="\nO editor não solda peças, não desancora membros e não desliga Animator automaticamente. Corrija a estrutura no projeto persistente."
+        lines[#lines+1]="ModelScale altera proporções do conjunto; Size de membro é edição geométrica e não recalibra C0/C1."
+        output(table.concat(lines,"\n"),"Diagnóstico estrutural, não teste de física no motor.");showPage("Exportar");window.Visible=true;V5.layout()
+    end
+    local page=pages.Rig
+    local sc=scroll(page,UDim2.new(),UDim2.fromScale(1,1))
+    local host=frame(sc,UDim2.new(),UDim2.new(1,-8,0,1080),C.bg)
+    local eyebrow=label(host,"PERSONAGEM / WORKSPACE",UDim2.fromOffset(8,6),UDim2.new(1,-16,0,24),true);eyebrow.TextColor3=C.accent
+    local title=label(host,"Seu personagem, inteiro.",UDim2.fromOffset(8,36),UDim2.new(1,-16,0,36));title.TextSize=23;title.Font=Enum.Font.GothamMedium;title.TextScaled=true;make("UITextSizeConstraint",title,{MinTextSize=16,MaxTextSize=23})
+    label(host,"Escolha o rig uma vez. Pose membros pelas juntas, grave o corpo inteiro e exporte suas faixas juntas.",UDim2.fromOffset(8,81),UDim2.new(1,-16,0,60),true)
+    button(host,"Escolher personagem",UDim2.fromOffset(4,153),UDim2.new(1,-8,0,44),safe(R.choose),true)
+    button(host,"Usar Model selecionado",UDim2.fromOffset(4,207),UDim2.new(.5,-8,0,44),safe(function() local model=selected and selected:IsA("Model") and selected or R.find(selected);R.set(model) end))
+    button(host,"Cena livre",UDim2.new(.5,4,0,207),UDim2.new(.5,-8,0,44),safe(R.clear))
+    local summary=label(host,"Nenhum rig ativo.",UDim2.fromOffset(8,267),UDim2.new(1,-16,0,76),true)
+    button(host,"Gravar pose do corpo inteiro",UDim2.fromOffset(4,357),UDim2.new(1,-8,0,44),safe(R.keyPose),true)
+    button(host,"Copiar pose do rig",UDim2.fromOffset(4,411),UDim2.new(.5,-8,0,44),safe(R.copyPose))
+    button(host,"Colar pose + key",UDim2.new(.5,4,0,411),UDim2.new(.5,-8,0,44),safe(R.pastePose))
+    button(host,"Diagnóstico do rig",UDim2.fromOffset(4,465),UDim2.new(.5,-8,0,44),safe(R.diagnostic))
+    button(host,"Exportar rig completo",UDim2.new(.5,4,0,465),UDim2.new(.5,-8,0,44),safe(function() assert(R.model,"Escolha um rig");R.exportMode="rig";showPage("Exportar");notify("Escopo: todas as faixas do rig ativo. Escolha Client-side ou Server-side. JSON editável continua guardando a cena inteira.") end))
+    label(host,"MEMBROS CONECTADOS",UDim2.fromOffset(8,529),UDim2.new(1,-16,0,28),true)
+    local members=scroll(host,UDim2.fromOffset(4,569),UDim2.new(1,-8,0,260))
+    label(host,"Juntas separadas são canais do MESMO corpo, não arquivos separados. Não use Part livre para posar um membro conectado. C0/Transform é preservado no export conjunto.",UDim2.fromOffset(8,843),UDim2.new(1,-16,0,85),true)
+    button(host,"Revisar CFrame de membros",UDim2.fromOffset(4,941),UDim2.new(1,-8,0,44),safe(R.archiveMemberTracks))
+    button(host,"Restaurar faixas arquivadas",UDim2.fromOffset(4,995),UDim2.new(1,-8,0,44),safe(R.restoreArchive))
+    function R.refresh()
+        if not R.model or not R.model.Parent then R.model=nil;R.data=nil end
+        for _,o in ipairs(members:GetChildren()) do o:Destroy() end
+        if not R.model then summary.Text="01  Escolha um personagem\n02  Pose as juntas • 03  Grave keys • 04  Exporte";return end
+        R.data=R.inspect(R.model)
+        summary.Text=R.model.Name.."\n"..#R.data.channels.." juntas/Bones • "..#R.tracks().." faixas • "..#R.data.issues.." alertas estruturais\n"..(R.protect and V5.targetMode~="part" and "Seleção protegida dentro do rig" or "Seleção de objetos livre")
+        for i,v in ipairs(R.data.channels) do
+            local entry=v;local tr=findTrack(entry.object,entry.property)
+            button(members,(entry.part and entry.part.Name or entry.object.Name).."  /  "..entry.property.."  ·  "..(tr and #tr.keys or 0).." keys",UDim2.fromOffset(4,(i-1)*48),UDim2.new(1,-12,0,42),safe(function()
+                V5.targetMode="limb";V5.selectedPart=entry.object:IsA("Motor6D") and entry.object.Part1 or nil
+                selectObject(entry.object,entry.property,true);showPage("Pose")
+            end),selected==entry.object)
+        end
+    end
+    function R.restoreContext()
+        local loc=project.editor and type(project.editor)=="table" and project.editor.rig
+        local ok,model=pcall(function() return type(loc)=="table" and Snake.resolve(loc) end)
+        R.model=ok and model and model:IsA("Model") and model or nil
+        if not R.model then R.exportMode="scene" end
+        R.refresh()
+    end
+    R.refresh()
+end
+installRigWorkspace()
+
+-- Timeline agrupada e virtualizada: dados e visibilidade são coisas diferentes.
+local function installStudioTimeline()
+    local T={padding=16,scope="scene",zoom="manual",drawing=false};V5.timeline=T
+    trackList.AutomaticCanvasSize=Enum.AutomaticSize.None
+    trackList.Position=UDim2.fromOffset(0,91);trackList.Size=UDim2.new(.38,-5,1,-207)
+    lane.Position=UDim2.new(.38,2,0,91);lane.Size=UDim2.new(.62,-2,1,-207)
+    timelineInfo.Position=UDim2.fromOffset(4,0);timelineInfo.Size=UDim2.new(1,-8,0,27)
+    V5.trackSearch.Position=UDim2.fromOffset(0,33);V5.trackSearch.Size=UDim2.new(.42,-4,0,42)
+    local view=button(timeline,"Cena ▾",UDim2.new(.42,0,0,33),UDim2.new(.22,-4,0,42),safe(function()
+        choices("Visão da timeline • não apaga faixas",{{label="Cena inteira: todos os objetos e rigs",value="scene"},{label="Somente rig ativo",value="rig"},{label="Somente canal selecionado",value="selection"}},function(value)
+            if value=="rig" then assert(V5.rig.model,"Escolha um rig") end
+            V5.timelineScope=value;lane.CanvasPosition=Vector2.zero;trackList.CanvasPosition=Vector2.zero;refreshTimeline()
+        end)
+    end))
+    button(timeline,"Ajustar",UDim2.new(.64,0,0,33),UDim2.new(.20,-4,0,42),function() T.zoom="fit";lane.CanvasPosition=Vector2.zero;refreshTimeline() end)
+    button(timeline,"−",UDim2.new(.84,0,0,33),UDim2.new(.08,-2,0,42),function() T.zoom="manual";pixelsPerSecond=math.max(1,pixelsPerSecond/1.5);refreshTimeline() end)
+    button(timeline,"+",UDim2.new(.92,0,0,33),UDim2.new(.08,0,0,42),function() T.zoom="manual";pixelsPerSecond=math.min(1200,pixelsPerSecond*1.5);refreshTimeline() end)
+    function T.showAll()
+        V5.timelineScope="scene";V5.filter="";V5.trackSearch.Text="";lane.CanvasPosition=Vector2.zero;trackList.CanvasPosition=Vector2.zero;T.zoom="fit";refreshTimeline()
+        notify("Todas as faixas da cena estão na timeline. A visão/filtro nunca apaga suas keys.")
+    end
+    local function include(tr)
+        if V5.filter~="" and not string.find(tr.label:lower(),V5.filter,1,true) then return false end
+        if V5.timelineScope=="rig" then return V5.rig.matches(tr.target) end
+        if V5.timelineScope=="selection" then return tr==selectedTrack end
+        return true
+    end
+    refreshTimeline=function()
+        if T.drawing then return end;T.drawing=true
+        if selected and selected.Parent and selectedProperty then selectedTrack=findTrack(selected,selectedProperty) elseif not selectedTrack or not table.find(project.tracks,selectedTrack) then selectedTrack=nil end
+        if selectedKey and (not selectedTrack or not table.find(selectedTrack.keys,selectedKey)) then selectedKey=nil end
+        for _,o in ipairs(trackList:GetChildren()) do o:Destroy() end
+        for _,o in ipairs(lane:GetChildren()) do if o~=ruler and o~=playLine then o:Destroy() end end
+        for _,o in ipairs(ruler:GetChildren()) do o:Destroy() end
+        local viewport=math.max(40,lane.AbsoluteSize.X)
+        if T.zoom=="fit" then pixelsPerSecond=math.max(.05,(viewport-40)/project.duration) end
+        local width=math.max(viewport-8,project.duration*pixelsPerSecond+T.padding*2)
+        local groups,order={},{};local shown,totalKeys,visibleKeys=0,0,0
+        for _,tr in ipairs(project.tracks) do
+            totalKeys=totalKeys+#tr.keys
+            if include(tr) then
+                local obj=Snake.resolve(tr.target);local model=obj and V5.rig.find(obj)
+                local name=model and "RIG  /  "..model.Name or tr.target.root=="Camera" and "CÂMERA" or tr.target.root=="PlayerGui" and "INTERFACE" or "CENA  /  "..tr.target.root
+                local id=model or name
+                if not groups[id] then groups[id]={name=name,tracks={}};order[#order+1]=id end
+                table.insert(groups[id].tracks,tr);shown=shown+1;visibleKeys=visibleKeys+#tr.keys
+            end
+        end
+        local height=math.max(80,32+#order*32+shown*44)
+        lane.CanvasSize=UDim2.fromOffset(width+8,height);trackList.CanvasSize=UDim2.fromOffset(0,height)
+        local x=math.clamp(lane.CanvasPosition.X,0,math.max(0,width+8-viewport))
+        local yscroll=math.clamp(lane.CanvasPosition.Y,0,math.max(0,height-lane.AbsoluteSize.Y))
+        lane.CanvasPosition=Vector2.new(x,yscroll);trackList.CanvasPosition=Vector2.new(0,yscroll)
+        ruler.Size=UDim2.fromOffset(width+8,30);ruler.ZIndex=2
+        playLine.Size=UDim2.fromOffset(2,height);playLine.Position=UDim2.fromOffset(T.padding+playhead*pixelsPerSecond,0);playLine.ZIndex=2
+        local step=math.max(1/project.fps,project.duration/12)
+        local tick=math.max(1,math.ceil(step))
+        for t=0,project.duration,tick do
+            local pos=T.padding+t*pixelsPerSecond
+            if pos>=x-50 and pos<=x+viewport+50 then
+                label(ruler,string.format("%.0fs",t),UDim2.fromOffset(pos+3,0),UDim2.fromOffset(50,28),true)
+                frame(lane,UDim2.fromOffset(pos,30),UDim2.fromOffset(1,height-30),C.panel)
+            end
+        end
+        local y=32;local dots=0
+        for _,id in ipairs(order) do
+            local group=groups[id]
+            if y+32>=yscroll and y<=yscroll+lane.AbsoluteSize.Y+44 then
+                local h=label(trackList,group.name,UDim2.fromOffset(6,y),UDim2.new(1,-12,0,30),true);h.TextColor3=C.accent;h.TextTruncate=Enum.TextTruncate.AtEnd;h.TextWrapped=false
+                frame(lane,UDim2.fromOffset(0,y),UDim2.fromOffset(width,30),C.panel)
+            end
+            y=y+32
+            for _,tr in ipairs(group.tracks) do
+                if y+44>=yscroll and y<=yscroll+lane.AbsoluteSize.Y+44 then
+                    local track=tr
+                    local b=button(trackList,tr.label,UDim2.fromOffset(2,y+2),UDim2.new(1,-8,0,40),safe(function()
+                        local obj=Snake.resolve(track.target)
+                        if obj then if selectObject(obj,track.property,true)==false then return end
+                        else selected=nil;selectedProperty=track.property;selectedKey=nil;V5.selectedPart=nil;notify("Alvo ausente. Você ainda pode inspecionar/apagar keys e excluir esta faixa; confira nomes/streaming.",true) end
+                        selectedTrack=track;refreshTimeline()
+                    end),tr==selectedTrack)
+                    b.TextSize=11;b.TextTruncate=Enum.TextTruncate.AtEnd;b.TextWrapped=false
+                    frame(lane,UDim2.fromOffset(0,y+43),UDim2.fromOffset(width,1),C.panel)
+                    local buckets={}
+                    for _,key in ipairs(tr.keys) do
+                        local pos=T.padding+key.t*pixelsPerSecond
+                        if pos>=x-20 and pos<=x+viewport+20 then
+                            local bin=math.floor(pos/10)
+                            local bucket=buckets[bin]
+                            if not bucket then bucket={key=key,count=0};buckets[bin]=bucket end
+                            bucket.count=bucket.count+1;if key==selectedKey then bucket.key=key end
+                        end
+                    end
+                    for _,bucket in pairs(buckets) do
+                        local k=bucket.key;local grouped=bucket.count>1;dots=dots+1
+                        local dot=button(lane,grouped and "●" or "◆",UDim2.fromOffset(T.padding+k.t*pixelsPerSecond-12,y+2),UDim2.fromOffset(26,40),nil,k==selectedKey)
+                        dot.Name=grouped and "SnakeKeyCluster" or "SnakeKeyframe";dot.ZIndex=4;dot.BackgroundTransparency=k==selectedKey and .1 or 1;dot.TextColor3=k==selectedKey and C.dark or C.accent
+                        dot:SetAttribute("KeyCount",bucket.count)
+                        connect(dot.InputBegan,safe(function(input)
+                            if input.UserInputType~=Enum.UserInputType.MouseButton1 and input.UserInputType~=Enum.UserInputType.Touch then return end
+                            if playing then stopPreview(false) end
+                            local object=Snake.resolve(track.target)
+                            if object and not V5.rig.allow(object) then return end
+                            selectedTrack=track;selectedKey=k;selected=object;selectedProperty=track.property
+                            V5.selectedPart=object and (object:IsA("BasePart") and object or object:IsA("JointInstance") and object.Part1) or nil
+                            if grouped then
+                                T.zoom="manual";pixelsPerSecond=math.min(1200,pixelsPerSecond*3)
+                                lane.CanvasPosition=Vector2.new(math.max(0,T.padding+k.t*pixelsPerSecond-viewport/2),yscroll)
+                                notify(bucket.count.." keys próximas agrupadas. Zoom ampliado; nenhuma key foi removida.")
+                                previewAt(k.t,true);refreshTimeline();return
+                            end
+                            draggingKey={track=track,key=k,dot=dot,saved=false};dragInput=input
+                            previewAt(k.t,true);defaultEase=k.ease or "smooth";easeButton.Text="Curva: "..(easeNames[defaultEase] or defaultEase)
+                        end))
+                    end
+                end
+                y=y+44
+            end
+        end
+        if shown==0 then label(trackList,"Nenhuma faixa nesta visão. Use Mostrar tudo.",UDim2.fromOffset(8,42),UDim2.new(1,-16,0,95),true) end
+        view.Text=({scene="Cena ▾",rig="Rig ▾",selection="Canal ▾"})[V5.timelineScope]
+        T.shownTracks=shown;T.totalKeys=totalKeys;T.visibleKeys=visibleKeys;T.renderedMarkers=dots
+        T.summary=string.format("%d/%d faixas • %d keys nesta visão / %d na cena",shown,#project.tracks,visibleKeys,totalKeys)
+        timelineInfo.Text=T.summary;V5.dirty=true;T.drawing=false
+        if advancedHooks.tracksChanged then advancedHooks.tracksChanged() end
+    end
+    connect(lane:GetPropertyChangedSignal("CanvasPosition"),function() if not T.drawing and not draggingKey and activePage=="Timeline" then refreshTimeline() end end)
+    connect(lane:GetPropertyChangedSignal("AbsoluteSize"),function() if not T.drawing and not draggingKey then refreshTimeline() end end)
+    T.zoom="fit";refreshTimeline()
+end
+installStudioTimeline()
+
+-- Shell responsivo: chrome de viewport e painéis focados, sem sobrepor os dois no telefone.
+local function installStudioShell()
+    local S={density=1,lastLayout="",highContrast=false};V5.studio=S
+    local W=V5.workspace;local U=W.ui
+    window.ZIndex=40
+    local scale=make("UIScale",window,{Name="SnakeInterfaceScale",Scale=1})
+    local navigation=make("ScrollingFrame",window,{Name="SnakeNavigation",Position=UDim2.fromOffset(10,52),Size=UDim2.new(1,-70,0,40),CanvasSize=UDim2.fromOffset(658,0),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=3,ScrollBarImageColor3=C.accent,ScrollingDirection=Enum.ScrollingDirection.X})
+    for i,name in ipairs({"Rig","Cena","Pose","Motion","Cutscene","Timeline","Exportar"}) do
+        local b=tabButtons[name];b.Parent=navigation;b.Position=UDim2.fromOffset((i-1)*94,0);b.Size=UDim2.fromOffset(88,36);b.TextScaled=false;b.TextSize=13;b.Selectable=true
+    end
+    button(window,"Abas",UDim2.new(1,-56,0,52),UDim2.fromOffset(46,36),safe(function()
+        local items={};for _,name in ipairs({"Rig","Cena","Pose","Motion","Cutscene","Timeline","Exportar"}) do items[#items+1]={label=name,value=name} end
+        choices("Para onde você quer ir?",items,function(name) showPage(name);window.Visible=true;V5.layout() end)
+    end))
+    for _,pair in ipairs({{timeBox,"TEMPO"},{durationBox,"DURAÇÃO"}}) do
+        local field=pair[1];local pad=field:FindFirstChildOfClass("UIPadding")
+        if pad then pad.PaddingTop=UDim.new(0,11);pad.PaddingBottom=UDim.new(0,2) end
+        local caption=label(field,pair[2],UDim2.fromOffset(0,-10),UDim2.new(1,0,0,10),true);caption.TextSize=8;caption.TextWrapped=false
+    end
+    status.Size=UDim2.new(1,-98,0,30);status.Position=UDim2.new(0,12,1,-40);status.TextWrapped=false;status.TextTruncate=Enum.TextTruncate.AtEnd
+    for _,page in pairs(pages) do page.Size=UDim2.new(1,-20,1,-190) end
+    button(window,"Aviso",UDim2.new(1,-76,1,-42),UDim2.fromOffset(64,36),safe(W.showNotice))
+    for _,o in ipairs(header:GetChildren()) do if o:IsA("TextLabel") and o.Text=="Membros • transformação • animação" then o.Text="STUDIO  /  ANIMAÇÃO + CUTSCENES";o.TextSize=10;o.TextColor3=C.muted;o.TextWrapped=false;o.TextTruncate=Enum.TextTruncate.AtEnd elseif o:IsA("TextLabel") and o.Text=="SNAKE ANIMATOR V1" then o.TextScaled=true;o.TextWrapped=false;make("UITextSizeConstraint",o,{MinTextSize=9,MaxTextSize=14}) end end
+    local edge=make("UIStroke",window,{Color=C.line,Transparency=.25,Thickness=1})
+    local studioName=label(U.toolbar,"STUDIO WORKSPACE",UDim2.fromOffset(14,29),UDim2.fromOffset(200,18),true);studioName.TextSize=10
+    U.title.TextSize=16;U.title.Position=UDim2.fromOffset(14,6)
+    local function panel(name) showPage(name);window.Visible=true;V5.active=true;V5.layout() end
+    local rigButton=button(U.toolbar,"Personagem",UDim2.new(1,-236,0,7),UDim2.fromOffset(132,38),safe(function() panel("Rig");V5.rig.choose() end))
+    local settings=button(U.toolbar,"Interface",UDim2.new(1,-96,0,7),UDim2.fromOffset(82,38),safe(function() S.preferences() end))
+    U.targetButton.Visible=false -- o seletor anterior continua disponível no menu e nos testes; substituído visualmente por workflow.
+    local stop=button(U.dock,"Parar",UDim2.new(),UDim2.fromOffset(60,44),safe(function() stopPreview(true);refreshTimeline();notify("Prévia encerrada e cena restaurada.") end))
+    local record=button(U.dock,"Gravar pose",UDim2.new(),UDim2.fromOffset(100,44),safe(function()
+        if V5.rig.model and V5.targetMode~="part" then V5.rig.keyPose() else V5.gizmo.keyTransform() end
+    end),true)
+    local showAll=button(U.dock,"Mostrar tudo",UDim2.new(),UDim2.fromOffset(110,36),safe(function() V5.timeline.showAll();panel("Timeline") end))
+    local openTimeline=button(U.dock,"Timeline",UDim2.new(),UDim2.fromOffset(90,36),function() panel("Timeline") end)
+    local scope=button(U.dock,"Visão: Cena",UDim2.new(),UDim2.fromOffset(110,36),safe(function()
+        choices("Keys visíveis na barra inferior",{{label="Cena inteira (não depende do membro selecionado)",value="scene"},{label="Rig ativo",value="rig"},{label="Somente canal selecionado",value="selection"}},function(value)
+            if value=="rig" then assert(V5.rig.model,"Escolha um rig primeiro") end
+            V5.timelineScope=value;refreshTimeline()
+        end);window.Visible=true;V5.layout()
+    end))
+    local summary=label(U.dock,"",UDim2.new(),UDim2.new(1,-20,0,26),true);summary.Name="SnakeKeyVisibility";summary.TextWrapped=false;summary.TextTruncate=Enum.TextTruncate.AtEnd
+    local controls={}
+    for _,o in ipairs(U.dock:GetChildren()) do if o:IsA("TextButton") then controls[o.Text]=o end end
+    local more=button(U.dock,"Mais ▾",UDim2.new(),UDim2.fromOffset(70,44),safe(function()
+        choices("Atalhos de animação",{
+            {label=autoKey and "Desligar Auto-key" or "Ligar Auto-key",value="auto"},
+            {label="Gravar só transformação selecionada",value="key"},
+            {label="Gravar pose do corpo inteiro",value="rigkey"},
+            {label="Escolher personagem",value="rig"},
+            {label="Voltar à cena livre",value="scene"},
+            {label="Mostrar todas as keys / limpar filtro",value="all"},
+            {label="Desfazer",value="undo"},{label="Refazer",value="redo"},
+            {label="Ferramentas, eixos, snap e seleção",value="tools"},
+            {label="Conforto, texto e contraste",value="prefs"}},function(value)
+                if value=="auto" then autoKey=not autoKey;autoButton.Text=autoKey and "Auto-key: On" or "Auto-key: Off"
+                elseif value=="key" then V5.gizmo.keyTransform()
+                elseif value=="rigkey" then V5.rig.keyPose()
+                elseif value=="rig" then V5.rig.choose()
+                elseif value=="scene" then V5.rig.clear()
+                elseif value=="all" then V5.timeline.showAll()
+                elseif value=="undo" then history(false)
+                elseif value=="redo" then history(true)
+                elseif value=="tools" then W.options()
+                elseif value=="prefs" then S.preferences() end
+            end)
+        window.Visible=true;V5.layout()
+    end))
+    local exportScope=button(exportPage,"Escopo: cena inteira ▾",UDim2.fromOffset(0,0),UDim2.new(1,0,0,42),safe(function()
+        choices("O que será incluído no playback?",{{label="Cena completa: rigs + objetos + Cutscene",value="scene"},{label="Rig ativo: TODAS as suas faixas",value="rig"}},function(value)
+            if value=="rig" then assert(V5.rig.model,"Escolha um personagem na aba Rig") end
+            V5.rig.exportMode=value;notify(value=="rig" and "Exportação reúne todas as faixas do rig, não apenas o membro selecionado." or "Exportação inclui a cena inteira.")
+        end)
+    end))
+    exportHint.Visible=false -- as orientações detalhadas continuam no status, Aviso e Como integrar.
+    function S.preferences()
+        assert(not V5.drag and not V5.busy and not V5.camera.active,"Finalize o gesto / bake antes de mudar a interface")
+        choices("Interface • conforto e clareza",{
+            {label="Tamanho padrão • mais espaço",value="normal"},
+            {label="Confortável • texto e controles 15% maiores",value="comfort"},
+            {label="Grande • texto e controles 30% maiores",value="large"},
+            {label=S.highContrast and "Contraste normal" or "Aumentar contraste das bordas",value="contrast"},
+            {label="Reorganizar layout / recuperar painéis",value="reset"},
+            {label="Mostrar todas as faixas e keys",value="all"},
+            {label="Ocultar workspace (preserva o projeto)",value="hide"}},function(value)
+                if value=="normal" then S.density=1 elseif value=="comfort" then S.density=1.15 elseif value=="large" then S.density=1.3
+                elseif value=="contrast" then
+                    S.highContrast=not S.highContrast
+                    for _,o in ipairs(gui:GetDescendants()) do if o:IsA("UIStroke") then o.Transparency=S.highContrast and .05 or .45 end end
+                elseif value=="reset" then V5.compact=true;S.density=1;showPage("Rig")
+                elseif value=="all" then V5.timeline.showAll()
+                elseif value=="hide" then V5.active=false;window.Visible=false end
+                S.lastLayout="";V5.layout()
+            end)
+        window.Visible=true;V5.layout()
+    end
+    local function position(b,x,y,w,h) b.Position=UDim2.fromOffset(x,y);b.Size=UDim2.fromOffset(w,h);b.Visible=true end
+    function V5.layout()
+        local cam=Workspace.CurrentCamera;local v=cam and cam.ViewportSize or Vector2.new(960,700)
+        local width,height=v.X,v.Y
+        local top,bottom,left,right=12,14,0,0
+        pcall(function() local a,b=game:GetService("GuiService"):GetGuiInset();top=math.max(top,a.Y+8);bottom=math.max(bottom,b.Y+8) end)
+        pcall(function()
+            local rect=game:GetService("GuiService"):GetInsetArea(Enum.ScreenInsets.DeviceSafeInsets)
+            left=math.max(0,rect.Min.X);right=math.max(0,v.X-rect.Max.X)
+            top=math.max(top,rect.Min.Y+8);bottom=math.max(bottom,v.Y-rect.Max.Y+8)
+        end)
+        width=math.max(240,width-left-right)
+        local narrow=width<1000;local short=height<520
+        local focused=window.Visible and (narrow or short or activePage=="Timeline")
+        S.narrow=narrow;S.focused=focused;S.viewport=v
+        local tw=math.min(780,width-24);local th=short and 54 or 108
+        U.toolbar.Position=UDim2.fromOffset(left+12,top);U.toolbar.Size=UDim2.fromOffset(tw,th)
+        U.title.Size=UDim2.fromOffset(math.max(80,tw-252),24)
+        studioName.Visible=tw>=550
+        if narrow then
+            U.title.Size=UDim2.fromOffset(tw-160,24);U.title.TextSize=12
+            position(rigButton,tw-150,5,92,38);position(settings,tw-52,5,44,38);settings.Text="UI"
+        else U.title.TextSize=16;position(rigButton,tw-236,7,132,38);position(settings,tw-96,7,82,38);settings.Text="Interface" end
+        local toolbarButtons={W.tools.off,W.tools.move,W.tools.rotate,W.tools.scale}
+        for _,o in ipairs(U.toolbar:GetChildren()) do if o:IsA("TextButton") and (o.Text=="Opções" or o.Text=="Viewport") then toolbarButtons[#toolbarButtons+1]=o end end
+        local columns=narrow and 4 or 6
+        U.title.Visible=not short
+        for i,b in ipairs(toolbarButtons) do
+            if i<=columns then position(b,8+(i-1)*(tw-(short and 240 or 16))/columns,short and 6 or 52,(tw-(short and 240 or 16))/columns-6,42) else b.Visible=false end
+        end
+        if short then studioName.Visible=false end
+        U.targetButton.Visible=false
+        local stacked=narrow and height>=720
+        local dh=stacked and 228 or 174
+        if short then dh=114 end
+        local dw=width-24
+        U.dock.Position=UDim2.fromOffset(left+12,height-bottom-dh);U.dock.Size=UDim2.fromOffset(dw,dh)
+        U.target.Position=UDim2.fromOffset(12,5);U.target.Size=UDim2.fromOffset(dw-116,28)
+        U.miniTime.Position=UDim2.fromOffset(dw-98,5);U.miniTime.Size=UDim2.fromOffset(86,30)
+        for _,b in pairs(controls) do b.Visible=false end
+        stop.Visible=true;record.Visible=true;more.Visible=true
+        local primary={controls.Play,stop,record,controls.Painel,more}
+        if not narrow and not short then primary={controls.Play,stop,controls["|◀ Key"],controls["Key ▶|"],record,controls["Auto Off"],controls.Painel,more} end
+        local bw=(dw-20)/#primary
+        for i,b in ipairs(primary) do position(b,10+(i-1)*bw,40,bw-5,42) end
+        if short then
+            U.target.Visible=false;U.miniTime.Visible=false
+            for i,b in ipairs(primary) do position(b,10+(i-1)*bw,4,bw-5,42) end
+        else U.target.Visible=true;U.miniTime.Visible=true end
+        local ry=short and 50 or 88;U.ruler.Position=UDim2.fromOffset(16,ry);U.ruler.Size=UDim2.fromOffset(dw-(short and 152 or 32),38);U.marker.Size=UDim2.fromOffset(2,38)
+        if stacked and not short then
+            position(scope,10,134,(dw-24)/3,38);position(openTimeline,14+(dw-24)/3,134,(dw-24)/3,38);position(showAll,18+2*(dw-24)/3,134,(dw-24)/3,38)
+            summary.Position=UDim2.fromOffset(12,174);summary.Size=UDim2.fromOffset(dw-24,22)
+            U.status.Position=UDim2.fromOffset(12,199);U.status.Size=UDim2.fromOffset(dw-138,22)
+            position(controls.Aviso,dw-118,194,50,30);position(controls.JSON,dw-62,194,50,30)
+        else
+            scope.Visible=false;openTimeline.Visible=false;showAll.Visible=false
+            summary.Position=UDim2.fromOffset(12,128);summary.Size=UDim2.fromOffset(dw-145,20)
+            U.status.Position=UDim2.fromOffset(12,short and 90 or 148);U.status.Size=UDim2.fromOffset(dw-145,22)
+            if short then summary.Visible=false else summary.Visible=true end
+            position(controls.Aviso,dw-118,dh-36,50,30);position(controls.JSON,dw-62,dh-36,50,30)
+        end
+        if stacked and not short then summary.Visible=true end
+        scale.Scale=S.density
+        local ww,wh,wx,wy
+        if focused then
+            ww=math.min(1100,width-24);wh=math.max(100,height-top-bottom);wx=(width+ww)/2;wy=top
+        elseif V5.compact then
+            ww=math.min(450,width-24);wh=math.max(240,height-top-th-dh-bottom-24);wx=width-12;wy=top+th+12
+        else
+            ww=math.min(1040,width-24);wh=math.max(260,math.min(720,height-top-bottom-24));wx=(width+ww)/2;wy=top+12
+        end
+        if V5.compact or focused then window.AnchorPoint=Vector2.new(1,0);window.Position=UDim2.fromOffset(left+wx,wy)
+        else window.AnchorPoint=Vector2.new(.5,.5);window.Position=UDim2.fromOffset(left+width/2,wy+wh/2) end
+        window.Size=UDim2.fromOffset(ww/S.density,wh/S.density)
+        U.toolbar.Visible=V5.active and not focused;U.dock.Visible=V5.active and not focused
+        toggle.Visible=not V5.active
+        toggle.Position=UDim2.fromOffset(left+12,math.max(top,height-bottom-46))
+        S.layoutState={width=width,height=height,windowWidth=ww,windowHeight=wh,windowTop=wy,toolbarHeight=th,dockHeight=dh,focused=focused}
+        S.lastLayout=table.concat({v.X,v.Y,tostring(window.Visible),tostring(V5.active),activePage,tostring(V5.compact),S.density},"/")
+    end
+    function S.revealFocus()
+        local focus=UserInputService:GetFocusedTextBox()
+        local keyboard=UserInputService.OnScreenKeyboardVisible
+        if S.padding and (not keyboard or focus~=S.lastFocus) then
+            if S.padding.object.Parent then S.padding.object.CanvasSize=S.padding.size end
+            S.padding=nil
+        end
+        if not keyboard or not focus or not focus:IsDescendantOf(gui) then S.lastFocus=nil;return end
+        local position=UserInputService.OnScreenKeyboardPosition
+        if S.lastFocus==focus and S.keyboardY==(position and position.Y) then return end
+        S.lastFocus=focus;S.keyboardY=position and position.Y
+        if not position or position.Y<=0 or focus.Size.Y.Scale~=0 or focus.Size.Y.Offset>150 then return end
+        local parent=focus.Parent
+        while parent and parent~=gui and not parent:IsA("ScrollingFrame") do parent=parent.Parent end
+        if not parent or not parent:IsA("ScrollingFrame") then return end
+        local delta=focus.AbsolutePosition.Y+focus.AbsoluteSize.Y-(position.Y-20)
+        if delta>0 then
+            S.padding={object=parent,size=parent.CanvasSize}
+            local actual=parent.AbsoluteCanvasSize and parent.AbsoluteCanvasSize.Y or parent.CanvasSize.Y.Offset
+            parent.CanvasSize=UDim2.new(parent.CanvasSize.X.Scale,parent.CanvasSize.X.Offset,0,actual+delta+60)
+            parent.CanvasPosition=Vector2.new(parent.CanvasPosition.X,parent.CanvasPosition.Y+delta)
+        end
+    end
+    function S.tick()
+        pcall(S.revealFocus)
+        local cam=Workspace.CurrentCamera;local v=cam and cam.ViewportSize or Vector2.new(960,700)
+        local key=table.concat({v.X,v.Y,tostring(window.Visible),tostring(V5.active),activePage,tostring(V5.compact),S.density},"/")
+        if key~=S.lastLayout then
+            V5.layout()
+            local index=table.find({"Rig","Cena","Pose","Motion","Cutscene","Timeline","Exportar"},activePage) or 1
+            navigation.CanvasPosition=Vector2.new(math.max(0,(index-1)*94-math.max(0,(window.Size.X.Offset-120)/2)),0)
+            if activePage=="Timeline" then refreshTimeline() end
+            if activePage=="Rig" then V5.rig.refresh() end
+        end
+        local total=0;for _,tr in ipairs(project.tracks) do total=total+#tr.keys end
+        scope.Text="Visão: "..({scene="Cena",rig="Rig",selection="Canal"})[V5.timelineScope]
+        summary.Text=string.format("%s • %d keys na cena • ● agrupa keys próximas",scope.Text,total)
+        exportScope.Text=V5.rig.exportMode=="rig" and "Escopo: rig completo ▾" or "Escopo: cena inteira ▾"
+        if V5.rig.model and not V5.rig.model.Parent then V5.rig.restoreContext() end
+    end
+    -- Editor de Cutscene dividido em tarefas em vez de um formulário de 2.150px.
+    do
+        local host
+        for _,o in ipairs(pages.Cutscene:GetDescendants()) do if o:IsA("TextLabel") and o.Text=="CUTSCENE • planos, áudio, VFX e apresentação" then host=o.Parent end end
+        if host then
+            local entries={};local section="Planos";local tabs={}
+            for _,o in ipairs(host:GetChildren()) do if o:IsA("GuiObject") then
+                local y=o.Position.Y.Offset
+                if y>=302 then entries[#entries+1]={object=o,y=y,section=y<869 and "Planos" or y<1642 and "Cues" or "Apresentação"};o:SetAttribute("StudioOriginalY",y) end
+            end end
+            local function sections()
+                for _,e in ipairs(entries) do
+                    local offset=e.section=="Planos" and 302 or e.section=="Cues" and 869 or 1642
+                    e.object.Visible=e.section==section;e.object.Position=UDim2.new(e.object.Position.X.Scale,e.object.Position.X.Offset,0,354+e.y-offset)
+                end
+                host.Size=UDim2.new(1,-6,0,section=="Cues" and 1135 or section=="Planos" and 925 or 890)
+                for name,b in pairs(tabs) do b.BackgroundColor3=name==section and C.accent or C.field;b.TextColor3=name==section and C.dark or C.text end
+            end
+            for i,name in ipairs({"Planos","Cues","Apresentação"}) do
+                local selectedSection=name
+                tabs[name]=button(host,name,UDim2.new((i-1)/3,2,0,302),UDim2.new(1/3,-6,0,42),function() section=selectedSection;sections() end)
+            end
+            sections();S.cinemaSections={select=function(name) section=name;sections() end}
+        end
+    end
+    S.controls={stop=stop,record=record,scope=scope,summary=summary,showAll=showAll,exportScope=exportScope,navigation=navigation}
+    V5.layout();showPage("Rig")
+end
+installStudioShell()
+
+showPage("Rig");refreshAll();window.Visible=false
 notify("Snake Animator V1 • Toque na peça no mundo. W/E/R: mover/girar/escalar. Salve o JSON antes de sair.")
