@@ -1,9 +1,9 @@
--- Snake Animator 4 completo: pronto para hospedar como arquivo Lua raw.
+-- Snake Animator 5 completo: pronto para hospedar como arquivo Lua raw.
 if not game:IsLoaded() then game.Loaded:Wait() end
 while not game:GetService("Players").LocalPlayer do task.wait() end
 game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
--- SNAKE ANIMATOR 4.0 / editor visual local para Roblox
--- Fonte completa: hospede SnakeAnimatorV4.lua como Raw no seu GitHub.
+-- SNAKE ANIMATOR 5.0 / editor visual local para Roblox
+-- Fonte completa: hospede SnakeAnimatorV5.lua como Raw no seu GitHub.
 -- Execute com seu executor dentro do seu projeto Studio Lite.
 -- O editor nao depende de readfile nem de modulos externos.
 -- Exporte o projeto JSON antes de encerrar o Play.
@@ -19,7 +19,7 @@ local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
 local SoundService = game:GetService("SoundService")
 Snake.allowed = {}
-for name in string.gmatch("ShirtTemplate PantsTemplate Graphic HeadColor3 LeftArmColor3 RightArmColor3 LeftLegColor3 RightLegColor3 TorsoColor3 Pivot ToolPivot CFrame C0 Transform Size Color Color3 Transparency Reflectance TextureID Texture TextureId Scale Offset Enabled Brightness Range Angle Shadows Rate Lifetime Speed LightEmission LightInfluence Rotation RotSpeed Acceleration Drag TimeScale SpreadAngle Width0 Width1 CurveSize0 CurveSize1 TextureSpeed MinLength WidthScale Heat SecondaryColor Opacity RiseVelocity SparkleColor FieldOfView Volume PlaybackSpeed ClockTime ExposureCompensation FogStart FogEnd FogColor Ambient OutdoorAmbient Density Haze Glare Decay Contrast Saturation TintColor Intensity Threshold FocusDistance InFocusRadius NearIntensity FarIntensity", "%S+") do
+for name in string.gmatch("ShirtTemplate PantsTemplate Graphic HeadColor3 LeftArmColor3 RightArmColor3 LeftLegColor3 RightLegColor3 TorsoColor3 ModelScale Pivot ToolPivot CFrame C0 Transform Size Color Color3 Transparency Reflectance TextureID Texture TextureId Scale Offset Enabled Brightness Range Angle Shadows Rate Lifetime Speed LightEmission LightInfluence Rotation RotSpeed Acceleration Drag TimeScale SpreadAngle Width0 Width1 CurveSize0 CurveSize1 TextureSpeed MinLength WidthScale Heat SecondaryColor Opacity RiseVelocity SparkleColor FieldOfView Volume PlaybackSpeed ClockTime ExposureCompensation FogStart FogEnd FogColor Ambient OutdoorAmbient Density Haze Glare Decay Contrast Saturation TintColor Intensity Threshold FocusDistance InFocusRadius NearIntensity FarIntensity", "%S+") do
 Snake.allowed[name] = true
 end
 function Snake.pack(v)
@@ -116,12 +116,23 @@ end
 function Snake.read(obj,prop)
 assert(Snake.allowed[prop],"Propriedade bloqueada")
 if prop=="Pivot" then return obj:GetPivot() end
+if prop=="ModelScale" then return obj:GetScale() end
 if prop=="ToolPivot" then return assert(obj:FindFirstChild("Handle"),"Tool sem Handle").CFrame end
 return obj[prop]
 end
 function Snake.write(obj,prop,v)
 assert(Snake.allowed[prop],"Propriedade bloqueada")
-if prop=="Pivot" then obj:PivotTo(v)
+if prop=="ModelScale" then
+assert(obj:IsA("Model") and type(v)=="number" and v==v and v>=.01 and v<=100,"Escala do Model: 0.01–100")
+local ratio=v/obj:GetScale()
+for _,p in ipairs(obj:GetDescendants()) do if p:IsA("BasePart") then
+local size=p.Size*ratio;assert(math.min(size.X,size.Y,size.Z)>=.001 and math.max(size.X,size.Y,size.Z)<=2048,"Escala excede tamanho permitido das Parts")
+end end
+obj:ScaleTo(v)
+elseif prop=="Size" and obj:IsA("BasePart") then
+assert(typeof(v)=="Vector3" and math.min(v.X,v.Y,v.Z)>=.001 and math.max(v.X,v.Y,v.Z)<=2048,"Tamanho da Part: 0.001–2048")
+obj.Size=v
+elseif prop=="Pivot" then obj:PivotTo(v)
 elseif prop=="ToolPivot" then obj.Handle.CFrame=v
 else obj[prop]=v end
 end
@@ -342,9 +353,22 @@ end
 end
 end
 function Snake.validate(project)
-assert(type(project)=="table" and (project.version==1 or project.version==2 or project.version==3 or project.version==4),"Versao de projeto invalida")
+assert(type(project)=="table" and (project.version==1 or project.version==2 or project.version==3 or project.version==4 or project.version==5),"Versao de projeto invalida")
 assert(type(project.duration)=="number" and project.duration>0 and project.duration<=600,"Duracao: 0.01 a 600 segundos")
 assert(type(project.tracks)=="table" and #project.tracks<=512,"Limite: 512 faixas")
+local scales={}
+local function ancestor(a,b)
+if a.root~=b.root or a.userId~=b.userId or #a.path>#b.path then return false end
+for i,v in ipairs(a.path) do local w=b.path[i];if v.name~=w.name or v.class~=w.class or (v.index or 1)~=(w.index or 1) then return false end end
+return true
+end
+for _,tr in ipairs(project.tracks) do if tr.property=="ModelScale" then
+assert(type(tr.scaleBase)=="number" and tr.scaleBase>=.01 and tr.scaleBase<=100,"ModelScale requer scaleBase")
+assert(type(tr.target)=="table" and type(tr.target.path)=="table","Alvo de escala inválido")
+for _,other in ipairs(scales) do assert(not ancestor(tr.target,other.target) and not ancestor(other.target,tr.target),"Evite faixas de escala de Models sobrepostos") end
+if project.body then assert(not ancestor(tr.target,project.body.rig) and not ancestor(project.body.rig,tr.target),"Finalize Body em FK antes de escalar o rig") end
+scales[#scales+1]=tr
+end end
 local count=0
 for _,track in ipairs(project.tracks) do
 assert(type(track.target)=="table" and type(track.target.path)=="table","Alvo invalido")
@@ -367,6 +391,7 @@ else for _,x in ipairs(key[field].data) do assert(type(x)=="number" and x==x and
 end
 end
 local value=Snake.unpack(key.value)
+if track.property=="ModelScale" then assert(type(value)=="number" and value>=.01 and value<=100,"Key de escala inválida") end
 if typeof(value)=="number" then assert(value==value and math.abs(value)<1e12,"Numero invalido") end
 count=count+1
 assert(count<=30000,"Limite: 30.000 keyframes")
@@ -401,11 +426,16 @@ Snake.validateBody(project.body,project.duration)
 Snake.validateAssist(project.assist,project.duration)
 return project
 end
+function Snake.isScaleRelative(obj,prop)
+return obj and (prop=="C0" or prop=="Transform" and (obj:IsA("Bone") or obj:IsA("Motor6D")) or prop=="CFrame" and obj:IsA("Attachment"))
+end
 function Snake.compile(project)
 local compiled={}
+local scales={}
+for _,tr in ipairs(project.tracks) do if tr.property=="ModelScale" then scales[#scales+1]={target=tr.target,base=tr.scaleBase or 1} end end
 for _,track in ipairs(project.tracks) do
 local obj=Snake.resolve(track.target)
-local entry={track=track,obj=obj,original=nil,nextRetry=0}
+local entry={track=track,obj=obj,original=nil,nextRetry=0,scales=scales}
 if obj and obj:IsA("Motor6D") and track.property=="C0" then entry.originalTransform=obj.Transform end
 if obj then
 local ok,v=pcall(Snake.read,obj,track.property)
@@ -415,7 +445,7 @@ table.insert(compiled,entry)
 end
 table.sort(compiled,function(a,b)
 local function rank(e)
-return (e.track.property=="Pivot" and 0 or 1000)+#e.track.target.path
+return (e.track.property=="ModelScale" and -1000 or e.track.property=="Pivot" and 0 or 1000)+#e.track.target.path
 end
 return rank(a)<rank(b)
 end)
@@ -439,6 +469,12 @@ local ok,err=pcall(function()
 local v=Snake.evaluate(tr.keys,t)
 if tr.target.root=="Camera" then e.obj.CameraType=Enum.CameraType.Scriptable end
 if e.obj:IsA("Motor6D") and tr.property=="C0" then e.obj.Transform=CFrame.identity end
+if Snake.isScaleRelative(e.obj,tr.property) then
+for _,scale in ipairs(e.scales or {}) do
+local model=Snake.resolve(scale.target)
+if model and e.obj:IsDescendantOf(model) then v=v+v.Position*(model:GetScale()/scale.base-1) end
+end
+end
 Snake.write(e.obj,tr.property,v)
 end)
 if not ok and not e.warned then e.warned=true;warn("Snake Animator: "..tostring(err)) end
@@ -503,7 +539,7 @@ end
 ]=]
 
 local SERVER_PREFIX = [=[
--- Snake Animator 4.0 | Script em ServerScriptService
+-- Snake Animator 5.0 | Script em ServerScriptService
 -- Requer SnakeAnimatorReceiver (LocalScript) em StarterPlayerScripts.
 -- Servidor coordena; clientes renderizam. Nao controla hitboxes/fisica no servidor.
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -596,7 +632,7 @@ end)
 bus:FireServer("ready")
 ]=]
 
--- Snake Animator 4.0 | Runtime compartilhado, incorporado aos scripts exportados.
+-- Snake Animator 5.0 | Runtime compartilhado, incorporado aos scripts exportados.
 -- Este arquivo, isoladamente, nao precisa ser instalado.
 local Snake = {}
 local Players = game:GetService("Players")
@@ -607,7 +643,7 @@ local Lighting = game:GetService("Lighting")
 local SoundService = game:GetService("SoundService")
 
 Snake.allowed = {}
-for name in string.gmatch("ShirtTemplate PantsTemplate Graphic HeadColor3 LeftArmColor3 RightArmColor3 LeftLegColor3 RightLegColor3 TorsoColor3 Pivot ToolPivot CFrame C0 Transform Size Color Color3 Transparency Reflectance TextureID Texture TextureId Scale Offset Enabled Brightness Range Angle Shadows Rate Lifetime Speed LightEmission LightInfluence Rotation RotSpeed Acceleration Drag TimeScale SpreadAngle Width0 Width1 CurveSize0 CurveSize1 TextureSpeed MinLength WidthScale Heat SecondaryColor Opacity RiseVelocity SparkleColor FieldOfView Volume PlaybackSpeed ClockTime ExposureCompensation FogStart FogEnd FogColor Ambient OutdoorAmbient Density Haze Glare Decay Contrast Saturation TintColor Intensity Threshold FocusDistance InFocusRadius NearIntensity FarIntensity", "%S+") do
+for name in string.gmatch("ShirtTemplate PantsTemplate Graphic HeadColor3 LeftArmColor3 RightArmColor3 LeftLegColor3 RightLegColor3 TorsoColor3 ModelScale Pivot ToolPivot CFrame C0 Transform Size Color Color3 Transparency Reflectance TextureID Texture TextureId Scale Offset Enabled Brightness Range Angle Shadows Rate Lifetime Speed LightEmission LightInfluence Rotation RotSpeed Acceleration Drag TimeScale SpreadAngle Width0 Width1 CurveSize0 CurveSize1 TextureSpeed MinLength WidthScale Heat SecondaryColor Opacity RiseVelocity SparkleColor FieldOfView Volume PlaybackSpeed ClockTime ExposureCompensation FogStart FogEnd FogColor Ambient OutdoorAmbient Density Haze Glare Decay Contrast Saturation TintColor Intensity Threshold FocusDistance InFocusRadius NearIntensity FarIntensity", "%S+") do
     Snake.allowed[name] = true
 end
 
@@ -707,12 +743,23 @@ end
 function Snake.read(obj,prop)
     assert(Snake.allowed[prop],"Propriedade bloqueada")
     if prop=="Pivot" then return obj:GetPivot() end
+    if prop=="ModelScale" then return obj:GetScale() end
     if prop=="ToolPivot" then return assert(obj:FindFirstChild("Handle"),"Tool sem Handle").CFrame end
     return obj[prop]
 end
 function Snake.write(obj,prop,v)
     assert(Snake.allowed[prop],"Propriedade bloqueada")
-    if prop=="Pivot" then obj:PivotTo(v)
+    if prop=="ModelScale" then
+        assert(obj:IsA("Model") and type(v)=="number" and v==v and v>=.01 and v<=100,"Escala do Model: 0.01–100")
+        local ratio=v/obj:GetScale()
+        for _,p in ipairs(obj:GetDescendants()) do if p:IsA("BasePart") then
+            local size=p.Size*ratio;assert(math.min(size.X,size.Y,size.Z)>=.001 and math.max(size.X,size.Y,size.Z)<=2048,"Escala excede tamanho permitido das Parts")
+        end end
+        obj:ScaleTo(v)
+    elseif prop=="Size" and obj:IsA("BasePart") then
+        assert(typeof(v)=="Vector3" and math.min(v.X,v.Y,v.Z)>=.001 and math.max(v.X,v.Y,v.Z)<=2048,"Tamanho da Part: 0.001–2048")
+        obj.Size=v
+    elseif prop=="Pivot" then obj:PivotTo(v)
     elseif prop=="ToolPivot" then obj.Handle.CFrame=v
     else obj[prop]=v end
 end
@@ -938,9 +985,22 @@ function Snake.validateAssist(cfg,duration)
 end
 
 function Snake.validate(project)
-    assert(type(project)=="table" and (project.version==1 or project.version==2 or project.version==3 or project.version==4),"Versao de projeto invalida")
+    assert(type(project)=="table" and (project.version==1 or project.version==2 or project.version==3 or project.version==4 or project.version==5),"Versao de projeto invalida")
     assert(type(project.duration)=="number" and project.duration>0 and project.duration<=600,"Duracao: 0.01 a 600 segundos")
     assert(type(project.tracks)=="table" and #project.tracks<=512,"Limite: 512 faixas")
+    local scales={}
+    local function ancestor(a,b)
+        if a.root~=b.root or a.userId~=b.userId or #a.path>#b.path then return false end
+        for i,v in ipairs(a.path) do local w=b.path[i];if v.name~=w.name or v.class~=w.class or (v.index or 1)~=(w.index or 1) then return false end end
+        return true
+    end
+    for _,tr in ipairs(project.tracks) do if tr.property=="ModelScale" then
+        assert(type(tr.scaleBase)=="number" and tr.scaleBase>=.01 and tr.scaleBase<=100,"ModelScale requer scaleBase")
+        assert(type(tr.target)=="table" and type(tr.target.path)=="table","Alvo de escala inválido")
+        for _,other in ipairs(scales) do assert(not ancestor(tr.target,other.target) and not ancestor(other.target,tr.target),"Evite faixas de escala de Models sobrepostos") end
+        if project.body then assert(not ancestor(tr.target,project.body.rig) and not ancestor(project.body.rig,tr.target),"Finalize Body em FK antes de escalar o rig") end
+        scales[#scales+1]=tr
+    end end
     local count=0
     for _,track in ipairs(project.tracks) do
         assert(type(track.target)=="table" and type(track.target.path)=="table","Alvo invalido")
@@ -963,6 +1023,7 @@ function Snake.validate(project)
                 end
             end
             local value=Snake.unpack(key.value)
+            if track.property=="ModelScale" then assert(type(value)=="number" and value>=.01 and value<=100,"Key de escala inválida") end
             if typeof(value)=="number" then assert(value==value and math.abs(value)<1e12,"Numero invalido") end
             count=count+1
             assert(count<=30000,"Limite: 30.000 keyframes")
@@ -997,11 +1058,16 @@ function Snake.validate(project)
     Snake.validateAssist(project.assist,project.duration)
     return project
 end
+function Snake.isScaleRelative(obj,prop)
+    return obj and (prop=="C0" or prop=="Transform" and (obj:IsA("Bone") or obj:IsA("Motor6D")) or prop=="CFrame" and obj:IsA("Attachment"))
+end
 function Snake.compile(project)
     local compiled={}
+    local scales={}
+    for _,tr in ipairs(project.tracks) do if tr.property=="ModelScale" then scales[#scales+1]={target=tr.target,base=tr.scaleBase or 1} end end
     for _,track in ipairs(project.tracks) do
         local obj=Snake.resolve(track.target)
-        local entry={track=track,obj=obj,original=nil,nextRetry=0}
+        local entry={track=track,obj=obj,original=nil,nextRetry=0,scales=scales}
         if obj and obj:IsA("Motor6D") and track.property=="C0" then entry.originalTransform=obj.Transform end
         if obj then
             local ok,v=pcall(Snake.read,obj,track.property)
@@ -1011,7 +1077,7 @@ function Snake.compile(project)
     end
     table.sort(compiled,function(a,b)
         local function rank(e)
-            return (e.track.property=="Pivot" and 0 or 1000)+#e.track.target.path
+            return (e.track.property=="ModelScale" and -1000 or e.track.property=="Pivot" and 0 or 1000)+#e.track.target.path
         end
         return rank(a)<rank(b)
     end)
@@ -1035,6 +1101,12 @@ function Snake.apply(compiled,t,allowCamera)
                     local v=Snake.evaluate(tr.keys,t)
                     if tr.target.root=="Camera" then e.obj.CameraType=Enum.CameraType.Scriptable end
                     if e.obj:IsA("Motor6D") and tr.property=="C0" then e.obj.Transform=CFrame.identity end
+                    if Snake.isScaleRelative(e.obj,tr.property) then
+                        for _,scale in ipairs(e.scales or {}) do
+                            local model=Snake.resolve(scale.target)
+                            if model and e.obj:IsDescendantOf(model) then v=v+v.Position*(model:GetScale()/scale.base-1) end
+                        end
+                    end
                     Snake.write(e.obj,tr.property,v)
                 end)
                 if not ok and not e.warned then e.warned=true;warn("Snake Animator: "..tostring(err)) end
@@ -1550,6 +1622,48 @@ function PhysicsMath.curveVelocity(keys,t,left)
     end
 end
 
+-- Transformações puras usadas pelos gizmos V5. Todos os deltas partem do início do gesto.
+local TransformMath={}
+function TransformMath.snap(n,step)
+    if not step or step<=0 then return n end
+    return math.floor(n/step+.5)*step
+end
+function TransformMath.axis(index) return index==1 and Vector3.xAxis or index==2 and Vector3.yAxis or Vector3.zAxis end
+function TransformMath.component(v,index) return index==1 and v.X or index==2 and v.Y or v.Z end
+function TransformMath.size(base,index,distance,uniform,minimum,maximum)
+    minimum,maximum=minimum or .001,maximum or 2048
+    local a={base.X,base.Y,base.Z}
+    if uniform then
+        local factor=1+distance/math.max(base.X,base.Y,base.Z,.001)
+        local low=math.max(minimum/base.X,minimum/base.Y,minimum/base.Z)
+        local high=math.min(maximum/base.X,maximum/base.Y,maximum/base.Z)
+        factor=math.clamp(factor,low,high)
+        return base*factor
+    end
+    a[index]=math.clamp(a[index]+distance,minimum,maximum)
+    return Vector3.new(table.unpack(a))
+end
+function TransformMath.pose(baseWorld,index,amount,mode,space)
+    local axis=TransformMath.axis(index)
+    if space=="local" then axis=baseWorld:VectorToWorldSpace(axis) end
+    if mode=="move" then return baseWorld+axis*amount end
+    return CFrame.new(baseWorld.Position)*CFrame.fromAxisAngle(axis,amount)*(baseWorld-baseWorld.Position)
+end
+function TransformMath.faceCenter(cf,base,newSize,index,sign)
+    return cf+cf:VectorToWorldSpace(TransformMath.axis(index))*((TransformMath.component(newSize,index)-TransformMath.component(base,index))*sign/2)
+end
+function TransformMath.scaledTranslation(cf,ratio) return cf+cf.Position*(ratio-1) end
+function TransformMath.projectedDelta(start,finish,axisPixels,studs)
+    local dx,dy=axisPixels.X,axisPixels.Y
+    local length2=dx*dx+dy*dy
+    if length2<16 then return nil end
+    return ((finish.X-start.X)*dx+(finish.Y-start.Y)*dy)/length2*studs
+end
+function TransformMath.tap(first,last,duration,multitouch)
+    local dx,dy=last.X-first.X,last.Y-first.Y
+    return not multitouch and duration<=.65 and dx*dx+dy*dy<=100
+end
+
 -- Interface Snake Animator. O arquivo instalavel e gerado com o runtime incorporado.
 local UserInputService=game:GetService("UserInputService")
 local TweenService=game:GetService("TweenService")
@@ -1557,7 +1671,8 @@ local player=Players.LocalPlayer
 local playerGui=player:WaitForChild("PlayerGui")
 if playerGui:FindFirstChild("SnakeAnimator") then playerGui.SnakeAnimator:Destroy() end
 
-local C={bg=Color3.fromRGB(13,17,24),panel=Color3.fromRGB(22,29,39),field=Color3.fromRGB(30,40,53),line=Color3.fromRGB(49,65,78),text=Color3.fromRGB(231,239,242),muted=Color3.fromRGB(157,177,185),accent=Color3.fromRGB(114,239,178),dark=Color3.fromRGB(10,39,27),warn=Color3.fromRGB(255,190,121)}
+local C={bg=Color3.fromRGB(13,16,24),panel=Color3.fromRGB(24,29,43),field=Color3.fromRGB(34,43,60),line=Color3.fromRGB(49,65,78),text=Color3.fromRGB(231,239,242),muted=Color3.fromRGB(157,177,185),accent=Color3.fromRGB(103,226,187),dark=Color3.fromRGB(10,39,27),warn=Color3.fromRGB(255,190,121)}
+local V5={active=false,world=true,locked=false,targetMode="part",space="local",uniform=false,opposite=false,snap=false,moveStep=.1,angleStep=5,scaleStep=.1,compact=true,filter="",dirty=true}
 local alive=true
 local connections={}
 local connectionCount=0
@@ -1579,12 +1694,13 @@ local function frame(parent,pos,size,color)
     return make("Frame",parent,{Position=pos,Size=size,BackgroundColor3=color or C.panel,BorderSizePixel=0})
 end
 local function label(parent,text,pos,size,small)
-    return make("TextLabel",parent,{Text=text,Position=pos,Size=size,BackgroundTransparency=1,TextColor3=small and C.muted or C.text,Font=Enum.Font.Gotham,TextSize=small and 11 or 13,TextXAlignment=Enum.TextXAlignment.Left,TextWrapped=true})
+    return make("TextLabel",parent,{Text=text,Position=pos,Size=size,BackgroundTransparency=1,TextColor3=small and C.muted or C.text,Font=Enum.Font.Gotham,TextSize=small and 12 or 14,TextXAlignment=Enum.TextXAlignment.Left,TextWrapped=true})
 end
 local function button(parent,text,pos,size,fn,accent)
-    local b=make("TextButton",parent,{Text=text,Position=pos,Size=size,BackgroundColor3=accent and C.accent or C.field,TextColor3=accent and C.dark or C.text,Font=Enum.Font.GothamMedium,TextSize=12,BorderSizePixel=0,AutoButtonColor=true})
+    local b=make("TextButton",parent,{Text=text,Position=pos,Size=size,BackgroundColor3=accent and C.accent or C.field,TextColor3=accent and C.dark or C.text,Font=Enum.Font.GothamMedium,TextSize=13,BorderSizePixel=0,AutoButtonColor=true})
     corner(b)
     if fn then connect(b.Activated,fn) end
+    b.TextWrapped=true;make("UIStroke",b,{Color=C.line,Thickness=1,Transparency=.65})
     return b
 end
 local function box(parent,text,pos,size)
@@ -1596,14 +1712,14 @@ end
 local function scroll(parent,pos,size)
     return make("ScrollingFrame",parent,{Position=pos,Size=size,BackgroundColor3=C.bg,BorderSizePixel=0,ScrollBarThickness=4,ScrollBarImageColor3=C.accent,CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,ScrollingDirection=Enum.ScrollingDirection.Y})
 end
-local gui=make("ScreenGui",playerGui,{Name="SnakeAnimator",ResetOnSpawn=false,DisplayOrder=50,ZIndexBehavior=Enum.ZIndexBehavior.Sibling})
+local gui=make("ScreenGui",playerGui,{Name="SnakeAnimator",ResetOnSpawn=false,IgnoreGuiInset=true,DisplayOrder=50,ZIndexBehavior=Enum.ZIndexBehavior.Sibling})
 local window=frame(gui,UDim2.fromScale(.5,.5),UDim2.fromOffset(960,650),C.bg)
-window.AnchorPoint=Vector2.new(.5,.5);corner(window,12)
+window.AnchorPoint=Vector2.new(.5,.5);window.ZIndex=20;corner(window,12)
 make("UIStroke",window,{Color=C.line,Thickness=1})
 local header=frame(window,UDim2.new(),UDim2.new(1,0,0,47),C.panel);header.Active=true;corner(header,12)
 label(header,"SNAKE / ANIMATOR",UDim2.fromOffset(14,3),UDim2.new(1,-135,0,25))
-label(header,"04  •  support / flight / motion",UDim2.fromOffset(14,25),UDim2.new(1,-100,0,17),true)
-local toggle=button(gui,"◈  Snake Animator",UDim2.new(0,12,1,-52),UDim2.fromOffset(166,38),function() window.Visible=not window.Visible;if window.Visible then window.Position=UDim2.fromScale(.5,.5) end end,true)
+label(header,"05  •  workspace / transform / motion",UDim2.fromOffset(14,25),UDim2.new(1,-100,0,17),true)
+local toggle=button(gui,"◈  Snake Animator",UDim2.new(0,12,1,-52),UDim2.fromOffset(166,38),function() window.Visible=not window.Visible;if window.Visible then V5.active=true end;if V5.layout then V5.layout() end end,true)
 button(header,"—",UDim2.new(1,-76,0,8),UDim2.fromOffset(30,30),function() window.Visible=false end)
 local status=label(window,"Pronto. Selecione um objeto ou abra um rig.",UDim2.new(0,12,1,-32),UDim2.new(1,-24,0,27),true)
 local function notify(msg,bad)
@@ -1637,7 +1753,7 @@ for i,name in ipairs({"Cena","Pose","Motion","Timeline","Exportar"}) do
 end
 
 local advancedHooks={}
-local project={version=4,name="Snake Scene",duration=5,fps=60,loop=false,tracks={}}
+local project={version=5,name="Snake Scene",duration=5,fps=60,loop=false,tracks={}}
 local selected,selectedProperty,selectedTrack,selectedKey=nil,nil,nil,nil
 local playhead,playing,playStart=0,false,0
 local defaultEase="smooth"
@@ -1706,7 +1822,7 @@ local function restoreOriginals()
     end
     table.sort(ordered,function(a,b)
         local function rank(x)
-            local n=x.prop=="Pivot" and 0 or 1000
+            local n=x.prop=="ModelScale" and -1000 or x.prop=="Pivot" and 0 or 1000
             local p=x.obj;while p do n=n+1;p=p.Parent end
             return n
         end
@@ -1721,17 +1837,29 @@ local function findTrack(obj,prop)
     for _,tr in ipairs(project.tracks) do if Snake.resolve(tr.target)==obj and tr.property==prop then return tr end end
 end
 local function ensureTrack(obj,prop)
+    if prop=="ModelScale" then
+        local bodyRig=project.body and Snake.resolve(project.body.rig)
+        assert(not bodyRig or (bodyRig~=obj and not bodyRig:IsDescendantOf(obj) and not obj:IsDescendantOf(bodyRig)),"Finalize Corpo em FK antes de escalar o rig")
+        for _,t in ipairs(project.tracks) do if t.property=="ModelScale" then local other=Snake.resolve(t.target);assert(not other or other==obj or (not obj:IsDescendantOf(other) and not other:IsDescendantOf(obj)),"Models com escala não podem se sobrepor") end end
+    end
     local tr=findTrack(obj,prop)
     if tr then return tr end
     assert(#project.tracks<512,"Limite de 512 faixas")
     remember(obj,prop)
     tr={target=Snake.locate(obj),label=obj.Name.." / "..prop,property=prop,keys={}}
+    if prop=="ModelScale" then tr.scaleBase=obj:GetScale() end
     table.insert(project.tracks,tr);rebuild();return tr
 end
 local function snap(t)
     return math.clamp(math.floor(t*project.fps+.5)/project.fps,0,project.duration)
 end
-local function insertKey(tr,t,value)
+local function insertKey(tr,t,value,canonicalInput)
+    if not canonicalInput and Snake.isScaleRelative(Snake.resolve(tr.target),tr.property) then
+        local obj=Snake.resolve(tr.target)
+        for _,scale in ipairs(project.tracks) do if scale.property=="ModelScale" then local model=Snake.resolve(scale.target)
+            if model and obj and obj:IsDescendantOf(model) then value=value+value.Position*((scale.scaleBase or 1)/model:GetScale()-1) end
+        end end
+    end
     for _,key in ipairs(tr.keys) do
         if math.abs(key.t-t)<.000001 then key.value=Snake.pack(value);key.ease=defaultEase;if defaultEase=="bezier" then key.bezier=clone(defaultBezier) end;return key end
     end
@@ -1742,6 +1870,7 @@ local function insertKey(tr,t,value)
     return key
 end
 local function keyCurrent()
+    assert(not V5.busy and not V5.drag,"Finalize o gesto/bake antes de gravar")
     assert(selected and selectedProperty,"Selecione um objeto e uma propriedade")
     snapshot()
     selectedTrack=ensureTrack(selected,selectedProperty)
@@ -1840,7 +1969,7 @@ local function properties(obj)
     if obj:IsA("Camera") then add("CFrame","FieldOfView")
     elseif obj:IsA("JointInstance") then add("C0")
     elseif obj:IsA("Bone") then add("Transform")
-    elseif obj:IsA("Model") then add("Pivot")
+    elseif obj:IsA("Model") then add("Pivot","ModelScale")
     elseif obj:IsA("Tool") then add("ToolPivot")
     elseif obj:IsA("BasePart") then add("CFrame","Size","Color","Transparency","Reflectance");if obj:IsA("MeshPart") then add("TextureID") end
     elseif obj:IsA("Attachment") then add("CFrame")
@@ -1874,9 +2003,10 @@ local function selectObject(obj,prop,stay)
     selectedProperty=prop or props[1]
     selectedTrack=selectedProperty and findTrack(obj,selectedProperty) or nil
     selectedKey=nil
-    selectionBox.Adornee=(obj:IsA("BasePart") or obj:IsA("Model")) and obj or nil
+    selectionBox.Adornee=(obj:IsA("BasePart") or obj:IsA("Model")) and obj or (obj:IsA("JointInstance") and obj.Part1 or nil)
     refreshInspector();refreshTimeline()
     if not stay then showPage("Pose") end
+    V5.dirty=true
     notify(obj.ClassName.." selecionado. "..(#props==0 and "Abra seus filhos para encontrar alvos animáveis." or "Edite valores e grave um keyframe."))
 end
 refreshExplorer=function()
@@ -2044,7 +2174,9 @@ label(poseInner,"Dica: capture a câmera durante o jogo, com a prévia desligada
 
 -- TIMELINE: faixas, scrubbing e arraste de keyframes.
 local timeline=pages.Timeline
-local timelineInfo=label(timeline,"Faixas / keyframes",UDim2.fromOffset(4,0),UDim2.new(1,-8,0,28),true)
+local timelineInfo=label(timeline,"Faixas / keyframes",UDim2.fromOffset(4,0),UDim2.new(.66,-8,0,28),true)
+V5.trackSearch=box(timeline,"",UDim2.new(.66,0,0,0),UDim2.new(.34,0,0,28));V5.trackSearch.PlaceholderText="Filtrar faixas…"
+connect(V5.trackSearch:GetPropertyChangedSignal("Text"),function() V5.filter=V5.trackSearch.Text:lower();refreshTimeline() end)
 local trackList=scroll(timeline,UDim2.fromOffset(0,35),UDim2.new(.38,-5,1,-151))
 local lane=make("ScrollingFrame",timeline,{Position=UDim2.new(.38,2,0,35),Size=UDim2.new(.62,-2,1,-151),BackgroundColor3=C.bg,BorderSizePixel=0,ScrollBarThickness=5,ScrollingDirection=Enum.ScrollingDirection.XY,CanvasSize=UDim2.fromOffset(600,300)})
 local ruler=frame(lane,UDim2.new(),UDim2.fromOffset(600,30),C.panel);ruler.Active=true
@@ -2077,8 +2209,11 @@ refreshTimeline=function()
         label(ruler,t.."s",UDim2.fromOffset(t*pixelsPerSecond+3,0),UDim2.fromOffset(45,26),true)
         frame(lane,UDim2.fromOffset(t*pixelsPerSecond,30),UDim2.fromOffset(1,height-30),C.panel)
     end
+    local shown=0
     for i,tr in ipairs(project.tracks) do
-        local y=32+(i-1)*42
+        if V5.filter=="" or string.find(tr.label:lower(),V5.filter,1,true) then
+        shown=shown+1
+        local y=32+(shown-1)*42
         local track=tr
         local b=button(trackList,tr.label,UDim2.fromOffset(2,y),UDim2.new(1,-8,0,34),safe(function()
             local obj=Snake.resolve(track.target);assert(obj,"Alvo não encontrado; verifique nomes e streaming")
@@ -2101,7 +2236,10 @@ refreshTimeline=function()
             end)
         end
     end
+    end
+    height=math.max(80,shown*42+32);lane.CanvasSize=UDim2.fromOffset(width+24,height);playLine.Size=UDim2.fromOffset(2,height)
     timelineInfo.Text=string.format("%d faixas  ·  %.3fs / %.2fs  ·  arraste ◆ para mover",#project.tracks,playhead,project.duration)
+    V5.dirty=true
     if advancedHooks.tracksChanged then advancedHooks.tracksChanged() end
 end
 connect(ruler.InputBegan,function(input)
@@ -2128,7 +2266,7 @@ button(timeline,"Copiar",UDim2.new(.25,2,1,-106),UDim2.new(.25,-4,0,32),safe(fun
 button(timeline,"Colar",UDim2.new(.5,2,1,-106),UDim2.new(.25,-4,0,32),safe(function()
     assert(copiedKey and selected and selectedProperty,"Copie uma chave e escolha um alvo")
     local v=Snake.read(selected,selectedProperty);assert(typeof(v)==copiedKey.value.kind,"Tipos incompatíveis")
-    snapshot();selectedTrack=ensureTrack(selected,selectedProperty);selectedKey=insertKey(selectedTrack,playhead,Snake.unpack(copiedKey.value));selectedKey.ease=copiedKey.ease;selectedKey.bezier=clone(copiedKey.bezier);selectedKey.inTangent=clone(copiedKey.inTangent);selectedKey.outTangent=clone(copiedKey.outTangent)
+    snapshot();selectedTrack=ensureTrack(selected,selectedProperty);selectedKey=insertKey(selectedTrack,playhead,Snake.unpack(copiedKey.value),true);selectedKey.ease=copiedKey.ease;selectedKey.bezier=clone(copiedKey.bezier);selectedKey.inTangent=clone(copiedKey.inTangent);selectedKey.outTangent=clone(copiedKey.outTangent)
     previewAt(playhead,true);refreshTimeline()
 end))
 button(timeline,"Apagar ◆",UDim2.new(.75,2,1,-106),UDim2.new(.25,-2,0,32),safe(deleteKey))
@@ -2162,11 +2300,11 @@ end
 connect(exportText:GetPropertyChangedSignal("Text"),fitExport)
 local function projectJSON(playback)
     Snake.validate(project)
-    project.version=4
+    project.version=5
     local data=project
     if playback then
         if project.body and #project.body.effectors>0 then assert(project.body.baked==true,"Body bake pendente. Use Motion → Corpo → Bake corporal antes de exportar") end
-        data={version=4,name=project.name,duration=project.duration,fps=project.fps,loop=project.loop,tracks=project.tracks}
+        data={version=5,name=project.name,duration=project.duration,fps=project.fps,loop=project.loop,tracks=project.tracks}
     end
     return HttpService:JSONEncode(data)
 end
@@ -2201,77 +2339,224 @@ button(exportPage,"Projeto JSON / importar",UDim2.new(.5,4,0,91),UDim2.new(.5,-4
         end
     end))
 end))
-button(exportPage,"Selecionar texto",UDim2.new(0,0,1,-34),UDim2.new(.5,-4,0,32),function()
+button(exportPage,"Copiar / selecionar",UDim2.new(0,0,1,-34),UDim2.new(.5,-4,0,32),function()
+    local copier=type(setclipboard)=="function" and setclipboard or (type(toclipboard)=="function" and toclipboard or nil)
+    if copier then local ok,result=pcall(copier,exportText.Text);if ok and result~=false then notify("Texto enviado ao clipboard do executor.");return end end
     exportText:CaptureFocus();exportText.CursorPosition=#exportText.Text+1;exportText.SelectionStart=1
-    notify("Use Copiar do teclado/menu do aparelho. Não há clipboard de executor.")
+    notify("Texto selecionado. Use Copiar do teclado/menu do aparelho.")
 end)
 button(exportPage,"Como integrar?",UDim2.new(.5,4,1,-34),UDim2.new(.5,-4,0,32),function()
-    output("SNAKE ANIMATOR 4 / MOTION ASSIST\n\nEditor: execute o fonte completo no seu executor\ndentro do Studio Lite. Não depende de readfile.\nMotion > Física: apoio e salto.\nAbra Motion > Corpo para controles, contatos e limites.\nProjetos com Body precisam de Bake corporal atualizado\nantes de exportar. As alterações invalidam o bake.\n\nCLIENT: LocalScript; ONLY_USER_ID filtra seu jogador.\nSERVER: Script em ServerScriptService + Receptor v4\nem StarterPlayerScripts. Um receptor por cliente.\nÉ sincronização visual, não física autoritativa.\n\nRemova a chamada automática final e use\nplaySnakeAnimation() no seu sistema.\nanimation.Stop(true) interrompe e restaura.\n\nExporte JSON antes de parar o Play.\nUse os arquivos 09 e 10 para o demo Body.\nLeia LEIA-ME.md para instalação, limites e exemplos.\nNão há equivalência completa ao Cascadeur,\nauto-physics ou garantia de 240 FPS.\n", "Guia rápido V4 • consulte LEIA-ME.md no pacote.")
+    output("SNAKE ANIMATOR 5 / MOTION ASSIST\n\nEditor: execute o fonte completo no seu executor\ndentro do Studio Lite. Não depende de readfile.\nMotion > Física: apoio e salto.\nAbra Motion > Corpo para controles, contatos e limites.\nProjetos com Body precisam de Bake corporal atualizado\nantes de exportar. As alterações invalidam o bake.\n\nCLIENT: LocalScript; ONLY_USER_ID filtra seu jogador.\nSERVER: Script em ServerScriptService + Receptor v5\nem StarterPlayerScripts. Um receptor por cliente.\nÉ sincronização visual, não física autoritativa.\n\nRemova a chamada automática final e use\nplaySnakeAnimation() no seu sistema.\nanimation.Stop(true) interrompe e restaura.\n\nExporte JSON antes de parar o Play.\nUse os arquivos 09 e 10 para o demo Body.\nLeia LEIA-ME.md para instalação, limites e exemplos.\nNão há equivalência completa ao Cascadeur,\nauto-physics ou garantia de 240 FPS.\n", "Guia rápido V5 • consulte LEIA-ME.md no pacote.")
 end)
 
--- Gizmos nativos opcionais. Os campos numericos continuam disponiveis no toque.
+-- V5: gizmos absolutos por gesto; nativos + alças projetadas para toque.
 local gizmoMode="off"
-local gizmoBase=nil
-gizmoProxy=make("Part",Workspace,{Name="SnakeGizmoProxy",Size=Vector3.new(1.2,1.2,1.2),Anchored=true,CanCollide=false,CanTouch=false,CanQuery=false,Transparency=1,CastShadow=false})
-local moveHandles=make("Handles",gui,{Name="SnakeMove",Adornee=gizmoProxy,Style=Enum.HandlesStyle.Movement,Color3=C.accent,Visible=false})
-local rotateHandles=make("ArcHandles",gui,{Name="SnakeRotate",Adornee=gizmoProxy,Visible=false})
-local function gizmoWorld()
-    if not selected or not selected.Parent or not selectedProperty then return nil end
-    local value=Snake.read(selected,selectedProperty)
-    if typeof(value)~="CFrame" then return nil end
-    if selected:IsA("JointInstance") then return selected.Part0 and (selected.Part0.CFrame*selected.C0) end
-    if selected:IsA("Bone") then return selected.TransformedWorldCFrame end
-    if selected:IsA("Attachment") then return selected.WorldCFrame end
-    if selected:IsA("Model") then return selected:GetPivot() end
-    if selected:IsA("Tool") then return selected:FindFirstChild("Handle") and selected.Handle.CFrame end
-    if selected:IsA("BasePart") then return selected.CFrame end
-    return nil
-end
-poseInner.Size=UDim2.new(1,-6,0,642)
 local gizmoButton
-gizmoButton=button(poseInner,"Gizmo: Off",UDim2.fromOffset(0,553),UDim2.new(1,0,0,34),function()
-    choices("Gizmo 3D / eixos locais",{{label="Desligado",value="off"},{label="Mover nos eixos locais",value="move"},{label="Girar nos eixos locais",value="rotate"}},function(v)
-        if v~="off" and advancedHooks.disableIKGizmo then advancedHooks.disableIKGizmo() end
-        gizmoMode=v;gizmoButton.Text="Gizmo: "..({off="Off",move="Mover",rotate="Girar"})[v]
-        notify("Minimize a janela para acessar o gizmo. Grave com + Key ou ative Auto-key.")
+local function installTransformGizmos()
+    local G={};V5.gizmo=G
+    local axisColors={Color3.fromRGB(249,111,120),Color3.fromRGB(119,224,161),Color3.fromRGB(108,171,255)}
+    gizmoProxy=make("Part",Workspace,{Name="SnakeGizmoProxy",Size=Vector3.new(1.2,1.2,1.2),Anchored=true,CanCollide=false,CanTouch=false,CanQuery=false,Transparency=1,CastShadow=false})
+    gizmoProxy:SetAttribute("SnakeEditorVisual",true)
+    local move=make("Handles",gui,{Name="SnakeMove",Adornee=gizmoProxy,Style=Enum.HandlesStyle.Movement,Color3=C.accent,Visible=false})
+    local rotate=make("ArcHandles",gui,{Name="SnakeRotate",Adornee=gizmoProxy,Visible=false})
+    local scale=make("Handles",gui,{Name="SnakeScale",Adornee=gizmoProxy,Style=Enum.HandlesStyle.Resize,Color3=C.warn,Visible=false})
+    local touch={};local drag=nil
+    local function property(mode)
+        assert(selected and selected.Parent,"Selecione uma peça no mundo ou no Explorer conectado")
+        if mode=="scale" then
+            if selected:IsA("Model") then return "ModelScale" end
+            if selected:IsA("BasePart") then return "Size" end
+            if selected:IsA("SpecialMesh") then return "Scale" end
+            error("Escala: selecione uma Part, MeshPart, Model ou SpecialMesh; juntas não possuem escala própria")
+        end
+        if selected:IsA("Model") then return "Pivot" end
+        if selected:IsA("Tool") then return "ToolPivot" end
+        if selected:IsA("JointInstance") then return "C0" end
+        if selected:IsA("Bone") then return "Transform" end
+        if selected:IsA("BasePart") or selected:IsA("Attachment") or selected:IsA("Camera") then return "CFrame" end
+        error("Alvo sem transformação espacial")
+    end
+    local function world(object)
+        if object:IsA("JointInstance") then return object.Part0 and object.Part0.CFrame*object.C0 end
+        if object:IsA("Bone") then return object.TransformedWorldCFrame end
+        if object:IsA("Attachment") then return object.WorldCFrame end
+        if object:IsA("Model") then return object:GetPivot() end
+        if object:IsA("Tool") then local p=object:FindFirstChild("Handle");return p and p.CFrame end
+        if object:IsA("SpecialMesh") then return object.Parent and object.Parent:IsA("BasePart") and object.Parent.CFrame end
+        return object.CFrame
+    end
+    function G.mode(mode)
+        assert(not V5.busy and not drag,"Finalize o gesto ou bake")
+        if mode~="off" then
+            local p=property(mode)
+            if p=="ModelScale" then
+                local rig=project.body and Snake.resolve(project.body.rig)
+                assert(not rig or (rig~=selected and not rig:IsDescendantOf(selected) and not selected:IsDescendantOf(rig)),"Finalize Corpo em FK antes de escalar o rig inteiro")
+            end
+            if advancedHooks.disableIKGizmo then advancedHooks.disableIKGizmo() end
+            selectedProperty=p;selectedTrack=findTrack(selected,p);selectedKey=nil
+        end
+        gizmoMode=mode;gizmoButton.Text="Gizmo: "..({off="Off",move="Mover",rotate="Girar",scale="Escalar"})[mode]
+        V5.dirty=true;refreshInspector();refreshTimeline()
+    end
+    function G.begin()
+        assert(gizmoMode~="off","Escolha Mover, Girar ou Escalar primeiro")
+        assert(not V5.busy and not drag,"Gesto ou bake já em andamento")
+        if playing then stopPreview(false) end
+        local p=property(gizmoMode);local cf=assert(world(selected),"Referência espacial ausente")
+        local base=Snake.read(selected,p)
+        if gizmoMode=="scale" and typeof(base)=="Vector3" then assert(math.min(base.X,base.Y,base.Z)>0,"A escala de entrada precisa ser positiva") end
+        local values={[p]=base}
+        if p=="Size" and V5.opposite then values.CFrame=selected.CFrame end
+        drag={object=selected,property=p,base=base,world=cf,values=values,time=playhead,mode=gizmoMode,space=V5.space,uniform=V5.uniform,opposite=V5.opposite,auto=autoKey,changed=false,snap=V5.snap,moveStep=V5.moveStep,angleStep=V5.angleStep,scaleStep=V5.scaleStep}
+        if selected:IsA("Motor6D") then drag.transform=selected.Transform end
+        V5.drag=true
+    end
+    local function stage()
+        if drag.changed then return end
+        drag.previous=clone(project);drag.undo=table.clone(undoStack);drag.redo=table.clone(redoStack)
+        snapshot();drag.changed=true
+        for prop,value in pairs(drag.values) do
+            remember(drag.object,prop)
+            local tr=ensureTrack(drag.object,prop)
+            if drag.auto and #tr.keys==0 and drag.time>0 then insertKey(tr,0,value) end
+        end
+    end
+    local function write(prop,value)
+        Snake.write(drag.object,prop,value)
+        if drag.auto then local tr=ensureTrack(drag.object,prop);selectedKey=insertKey(tr,drag.time,value);selectedTrack=tr end
+    end
+    function G.apply(index,amount,sign)
+        if not drag then return end
+        assert(drag.object.Parent and selected==drag.object and playhead==drag.time,"Alvo/tempo mudou durante o gesto")
+        sign=sign or 1
+        local step=drag.mode=="rotate" and math.rad(drag.angleStep) or (drag.mode=="scale" and drag.scaleStep or drag.moveStep)
+        if drag.snap then amount=TransformMath.snap(amount,step) end
+        if math.abs(amount)<1e-10 and not drag.changed then return end
+        local value,position
+        if drag.mode=="scale" then
+            if drag.property=="ModelScale" then value=math.clamp(drag.base+amount,.01,100)
+            else
+                value=TransformMath.size(drag.base,index,amount,drag.uniform,.001,drag.property=="Size" and 2048 or 1000)
+                if drag.property=="Size" and drag.opposite then position=TransformMath.faceCenter(drag.values.CFrame,drag.base,value,index,sign) end
+            end
+        else
+            local desired=TransformMath.pose(drag.world,index,amount*sign,drag.mode,drag.space)
+            local mapping=drag.world*drag.base:Inverse();value=mapping:Inverse()*desired
+        end
+        stage()
+        if drag.object:IsA("Motor6D") then drag.object.Transform=CFrame.identity end
+        write(drag.property,value);if position then write("CFrame",position) end
+        selectedProperty=drag.property;selectedTrack=findTrack(drag.object,drag.property)
+        if drag.auto then for _,k in ipairs(selectedTrack.keys) do if math.abs(k.t-drag.time)<1e-6 then selectedKey=k;break end end end
+        V5.pending={object=drag.object,properties={}}
+        for prop in pairs(drag.values) do V5.pending.properties[#V5.pending.properties+1]=prop end
+        V5.dirty=true
+    end
+    function G.finish()
+        if not drag then return end
+        local changed,auto=drag.changed,drag.auto
+        drag=nil;V5.drag=false;V5.ignorePickUntil=os.clock()+.2
+        refreshInspector();refreshTimeline()
+        if changed then notify(auto and "Transformação gravada. A origem em t=0 foi preservada quando necessária." or "Transformação pronta. Use Key transformação para gravar todos os canais alterados.") end
+    end
+    function G.cancel()
+        if not drag then return end
+        local old=drag;drag=nil;V5.drag=false
+        if old.changed then project=old.previous;undoStack=old.undo;redoStack=old.redo end
+        if old.object.Parent then
+            for _,p in ipairs({"ModelScale","Size","Scale","Pivot","ToolPivot","CFrame","C0","Transform"}) do if old.values[p]~=nil then pcall(Snake.write,old.object,p,old.values[p]) end end
+            if old.transform then old.object.Transform=old.transform end
+        end
+        V5.pending=nil;V5.ignorePickUntil=os.clock()+.2;rebuild();refreshAll();notify("Gesto cancelado; pose e faixas anteriores restauradas.")
+    end
+    V5.cancel=G.cancel
+    function G.nudge(index,direction)
+        local amount=gizmoMode=="rotate" and math.rad(V5.angleStep) or (gizmoMode=="scale" and V5.scaleStep or V5.moveStep)
+        G.begin()
+        local ok,err=pcall(G.apply,index,amount*direction,1)
+        if not ok then G.cancel();error(err) end
+        G.finish()
+    end
+    function G.keyTransform()
+        assert(selected and not V5.busy and not drag,"Selecione um alvo e finalize o gesto")
+        local list
+        if V5.pending and V5.pending.object==selected then list=V5.pending.properties
+        elseif selected:IsA("BasePart") then list={"CFrame","Size"}
+        elseif selected:IsA("Model") then list={"Pivot"};if findTrack(selected,"ModelScale") then list[#list+1]="ModelScale" end
+        else list={property(gizmoMode=="scale" and "scale" or "move")} end
+        snapshot()
+        for _,p in ipairs(list) do local tr=ensureTrack(selected,p);insertKey(tr,playhead,Snake.read(selected,p)) end
+        refreshTimeline();notify("Key transformação: "..#list.." canais gravados juntos.")
+    end
+    poseInner.Size=UDim2.new(1,-6,0,850)
+    gizmoButton=button(poseInner,"Gizmo: Off",UDim2.fromOffset(0,553),UDim2.new(1,0,0,34),function()
+        choices("Transformar a seleção",{{label="Desligado",value="off"},{label="Mover",value="move"},{label="Girar",value="rotate"},{label="Escalar",value="scale"}},G.mode)
     end)
-end)
-label(poseInner,"Gizmos usam Handles nativos (mouse; suporte a toque varia). No celular, os campos numéricos são a alternativa confiável. Sem IK.",UDim2.fromOffset(4,591),UDim2.new(1,-8,0,48),true)
-local function beginGizmo()
-    if playing then stopPreview(false) end
-    assert(gizmoWorld(),"Este alvo não aceita gizmo")
-    snapshot();selectedTrack=ensureTrack(selected,selectedProperty)
-    gizmoBase=Snake.read(selected,selectedProperty)
+    label(poseInner,"W mover • E girar • R escalar. Arraste X/Y/Z na cena ou use passos abaixo. Esc cancela o gesto. Model escala uniforme; Part permite eixos independentes.",UDim2.fromOffset(4,591),UDim2.new(1,-8,0,67),true)
+    for i,name in ipairs({"X","Y","Z"}) do
+        button(poseInner,"−"..name,UDim2.new((i-1)/3,0,0,670),UDim2.new(1/6,-3,0,36),safe(function() G.nudge(i,-1) end))
+        local b=button(poseInner,"+"..name,UDim2.new((i-1)/3+1/6,0,0,670),UDim2.new(1/6,-3,0,36),safe(function() G.nudge(i,1) end));b.TextColor3=axisColors[i]
+    end
+    button(poseInner,"Key transformação",UDim2.fromOffset(0,718),UDim2.new(1,0,0,36),safe(G.keyTransform),true)
+    button(poseInner,"Cancelar gesto",UDim2.fromOffset(0,765),UDim2.new(1,0,0,34),G.cancel)
+    local function face(faceId)
+        local v=Vector3.FromNormalId(faceId)
+        if math.abs(v.X)>.5 then return 1,v.X elseif math.abs(v.Y)>.5 then return 2,v.Y else return 3,v.Z end
+    end
+    local function guardedApply(...)
+        local ok,err=pcall(G.apply,...)
+        if not ok then G.cancel();error(err) end
+    end
+    for _,handle in ipairs({move,rotate,scale}) do connect(handle.MouseButton1Down,safe(G.begin));connect(handle.MouseButton1Up,safe(G.finish)) end
+    connect(move.MouseDrag,safe(function(f,d) local i,sign=face(f);guardedApply(i,d,sign) end))
+    connect(scale.MouseDrag,safe(function(f,d) local i,sign=face(f);guardedApply(i,d,sign) end))
+    connect(rotate.MouseDrag,safe(function(axis,angle) guardedApply(axis==Enum.Axis.X and 1 or axis==Enum.Axis.Y and 2 or 3,angle,1) end))
+    for i,name in ipairs({"X","Y","Z"}) do
+        local b=button(gui,name,UDim2.new(),UDim2.fromOffset(36,36),nil);b.Name="SnakeTouch"..name;b.BackgroundColor3=axisColors[i];b.TextColor3=C.dark;b.Visible=false;b.ZIndex=10;touch[i]=b
+        connect(b.InputBegan,safe(function(input)
+            if input.UserInputType~=Enum.UserInputType.Touch and input.UserInputType~=Enum.UserInputType.MouseButton1 then return end
+            G.begin();drag.input=input;drag.start=input.Position;drag.touchAxis=i
+            local cam=Workspace.CurrentCamera;local cf=drag.world
+            local axis=(drag.space=="local" or drag.mode=="scale") and cf:VectorToWorldSpace(TransformMath.axis(i)) or TransformMath.axis(i)
+            local p=cam:WorldToViewportPoint(cf.Position);local q=cam:WorldToViewportPoint(cf.Position+axis)
+            drag.screenAxis=Vector2.new(q.X-p.X,q.Y-p.Y)
+        end))
+    end
+    connect(UserInputService.InputChanged,safe(function(input)
+        if not drag or not drag.input then return end
+        if input~=drag.input and not (drag.input.UserInputType==Enum.UserInputType.MouseButton1 and input.UserInputType==Enum.UserInputType.MouseMovement) then return end
+        local amount=drag.mode=="rotate" and math.rad(input.Position.X-drag.start.X) or TransformMath.projectedDelta(drag.start,input.Position,drag.screenAxis,1)
+        if amount then guardedApply(drag.touchAxis,amount,1) end
+    end))
+    connect(UserInputService.InputEnded,safe(function(input)
+        if drag and drag.input and (input==drag.input or input.UserInputType==Enum.UserInputType.MouseButton1 and drag.input.UserInputType==Enum.UserInputType.MouseButton1) then G.finish() end
+    end))
+    connect(RunService.RenderStepped,function()
+        local enabled=alive and V5.active and not V5.busy and not playing and selected and selected.Parent and gizmoMode~="off"
+        local ok,cf=pcall(function() return enabled and world(selected) end)
+        enabled=enabled and ok and cf~=nil and cf~=false
+        move.Visible=enabled and gizmoMode=="move" or false;rotate.Visible=enabled and gizmoMode=="rotate" or false;scale.Visible=enabled and gizmoMode=="scale" or false
+        for _,b in ipairs(touch) do b.Visible=false end
+        if not enabled then return end
+        local proxy=(V5.space=="world" and gizmoMode~="scale") and CFrame.new(cf.Position) or cf
+        gizmoProxy.CFrame=proxy;gizmoProxy.Size=selected:IsA("BasePart") and selected.Size or Vector3.new(1.5,1.5,1.5)
+        pcall(function()
+            local cam=Workspace.CurrentCamera;local p,visible=cam:WorldToViewportPoint(cf.Position)
+            if not visible or p.Z<=0 then return end
+            for i,b in ipairs(touch) do
+                local q=cam:WorldToViewportPoint(cf.Position+proxy:VectorToWorldSpace(TransformMath.axis(i)))
+                local dx,dy=q.X-p.X,q.Y-p.Y;local length=math.sqrt(dx*dx+dy*dy)
+                if length>=4 then
+                    local x,y=p.X+dx/length*78,p.Y+dy/length*78
+                    b.Position=UDim2.fromOffset(x-18,y-18);b.Visible=x>20 and y>20 and x<cam.ViewportSize.X-20 and y<cam.ViewportSize.Y-20
+                end
+            end
+        end)
+    end)
+    connect(gui.Destroying,function() if gizmoProxy.Parent then gizmoProxy:Destroy() end end)
 end
-local function applyGizmo(delta)
-    if not gizmoBase then return end
-    local v=gizmoBase*delta
-    if selected:IsA("Motor6D") then selected.Transform=CFrame.identity end
-    Snake.write(selected,selectedProperty,v)
-    if autoKey then selectedKey=insertKey(selectedTrack,playhead,v) end
-end
-connect(moveHandles.MouseButton1Down,safe(beginGizmo))
-connect(rotateHandles.MouseButton1Down,safe(beginGizmo))
-connect(moveHandles.MouseDrag,safe(function(face,distance)
-    applyGizmo(CFrame.new(Vector3.FromNormalId(face)*distance))
-end))
-connect(rotateHandles.MouseDrag,safe(function(axis,angle)
-    local vector=axis==Enum.Axis.X and Vector3.new(1,0,0) or (axis==Enum.Axis.Y and Vector3.new(0,1,0) or Vector3.new(0,0,1))
-    applyGizmo(CFrame.fromAxisAngle(vector,angle))
-end))
-local function endGizmo()
-    if gizmoBase then gizmoBase=nil;refreshInspector();refreshTimeline();notify(autoKey and "Gizmo: pose gravada." or "Gizmo: pose alterada. Grave com + Key.") end
-end
-connect(moveHandles.MouseButton1Up,safe(endGizmo))
-connect(rotateHandles.MouseButton1Up,safe(endGizmo))
-connect(RunService.RenderStepped,function()
-    local ok,world=pcall(gizmoWorld)
-    local enabled=ok and world~=nil and not playing and gizmoMode~="off"
-    moveHandles.Visible=enabled and gizmoMode=="move"
-    rotateHandles.Visible=enabled and gizmoMode=="rotate"
-    if enabled then gizmoProxy.CFrame=world end
-end)
-connect(gui.Destroying,function() gizmoProxy:Destroy() end)
+installTransformGizmos()
 
 local function installAdvancedTools()
     local A={channel=1,pin=false,baking=false,ghosts=false,trace=false,dirtyGraph=true,lastGraph=0,lastGhost=0,ghostDirty=false,posesIndex=1,ikGizmo="off",cleanupDone=false}
@@ -2568,7 +2853,7 @@ local function installAdvancedTools()
             end)
         end)
         advancedHooks.disableIKGizmo=function()
-            A.ikGizmo="off";A.pin=false;if A.body then A.body.gizmo="off" end;ikModeButton.Text="Gizmo IK: Off";A.refreshIK()
+            A.ikGizmo="off";A.pin=false;if A.body then A.body.gizmo="off";A.body.live=false;A.body.refresh() end;ikModeButton.Text="Gizmo IK: Off";A.refreshIK()
         end
         button(panel,"Usar Attachment como ponta",UDim2.fromOffset(0,493),UDim2.new(1,0,0,34),safe(function()
             local _,mid,_,cfg=chain()
@@ -2604,7 +2889,7 @@ local function installAdvancedTools()
             local progress=label(overlay,"Preparando bake…",UDim2.fromOffset(16,30),UDim2.new(1,-32,0,70))
             local cancelled=false
             button(overlay,"Cancelar sem gravar",UDim2.new(.1,0,.5,0),UDim2.new(.8,0,0,40),function() cancelled=true end)
-            A.baking=true
+            A.baking=true;V5.busy=true
             local ok,err=pcall(function()
                 for i=0,count-1 do
                     assert(alive and project==originalProject and not cancelled,"Bake cancelado")
@@ -2627,7 +2912,7 @@ local function installAdvancedTools()
                 commit(root,resultsR);commit(mid,resultsM)
                 project.fps=math.max(project.fps,math.min(240,math.ceil(rate)))
             end)
-            A.baking=false
+            A.baking=false;V5.busy=false
             if overlay.Parent then overlay:Destroy() end
             if alive then
                 rebuild();previewAt(math.min(originalTime,project.duration),true);refreshAll()
@@ -3223,6 +3508,7 @@ local function installAdvancedTools()
         end
         function B.bake(rate,recipe)
             assert(not playing and not A.baking,"Pause antes do bake")
+            Snake.validate(project)
             local body=cfg();assert(#body.effectors>0,"Crie controles primeiro")
             local sources=captureSources(body)
             local extras={}
@@ -3249,7 +3535,7 @@ local function installAdvancedTools()
             local progress=label(overlay,"Body bake…",UDim2.fromOffset(16,30),UDim2.new(1,-32,0,110))
             local cancelled=false;local worst=0;local worstAngle=0
             button(overlay,"Cancelar sem gravar",UDim2.new(.1,0,.6,0),UDim2.new(.8,0,0,38),function() cancelled=true end)
-            A.baking=true;B.busy=true;B.live=false;A.pin=false
+            A.baking=true;V5.busy=true;B.busy=true;B.live=false;A.pin=false
             local ok,err=pcall(function()
                 for k,t in ipairs(times) do
                     assert(alive and project==initialProject and projectRevision==initialRevision and not cancelled,"Bake cancelado")
@@ -3277,7 +3563,7 @@ local function installAdvancedTools()
                 if recipe then recipe.commit() end
                 body.sources=sources;body.baked=true;body.lastError=worst;body.lastAngle=worstAngle;project.fps=math.max(project.fps,math.min(240,math.ceil(rate)))
             end)
-            A.baking=false;B.busy=false
+            A.baking=false;V5.busy=false;B.busy=false
             if overlay.Parent then overlay:Destroy() end
             if alive then
                 rebuild();previewAt(math.min(originalTime,project.duration),true);refreshAll();B.refresh();if A.physics then A.physics.refresh() end
@@ -3293,6 +3579,7 @@ local function installAdvancedTools()
             assert(not playing and not A.baking,"Pause antes de configurar")
             if project.body and project.body.sources then error("Use Voltar às faixas FK antes de substituir a configuração") end
             local rig=getRig();local rest={}
+            for _,tr in ipairs(project.tracks) do if tr.property=="ModelScale" then local m=Snake.resolve(tr.target);assert(not m or (m~=rig and not m:IsDescendantOf(rig) and not rig:IsDescendantOf(m)),"Remova a faixa ModelScale antes de configurar Corpo neste rig") end end
             for _,j in ipairs(rig:GetDescendants()) do if j:IsA("Motor6D") then table.insert(rest,{target=Snake.locate(j),value=Snake.pack(j.C0),limit={mode="free",axis={1,0,0},min=-180,max=180,cone=180}}) end end
             assert(#rest>0 and #rest<=180,"Rig precisa ter 1–180 Motor6Ds")
             snapshot();project.assist=nil;project.body={rig=Snake.locate(rig),rest=rest,effectors={},iterations=32,baked=false};B.live=false;B.refresh()
@@ -3968,6 +4255,7 @@ refreshAll=function()
     if advancedHooks.projectChanged then advancedHooks.projectChanged() end
 end
 local function history(redo)
+    assert(not V5.busy and not V5.drag,"Finalize/cancele o gesto ou bake antes de desfazer")
     local source=redo and redoStack or undoStack
     local destination=redo and undoStack or redoStack
     assert(#source>0,"Histórico vazio")
@@ -4004,6 +4292,7 @@ connect(UserInputService.InputChanged,safe(function(input)
     local touch=input.UserInputType==Enum.UserInputType.Touch
     if not mouse and not touch then return end
     if headerDrag and (mouse or input==headerDrag.input) then
+        V5.compact=false
         local d=input.Position-headerDrag.start
         window.Position=UDim2.new(headerDrag.pos.X.Scale,headerDrag.pos.X.Offset+d.X,headerDrag.pos.Y.Scale,headerDrag.pos.Y.Offset+d.Y)
     end
@@ -4028,17 +4317,9 @@ connect(UserInputService.InputEnded,safe(function(input)
 end))
 connect(UserInputService.InputBegan,safe(function(input,processed)
     if processed or UserInputService:GetFocusedTextBox() then return end
-    if pickInWorld and (input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch) then
-        local cam=Workspace.CurrentCamera
-        local ray=cam:ScreenPointToRay(input.Position.X,input.Position.Y)
-        local params=RaycastParams.new();params.FilterType=Enum.RaycastFilterType.Exclude
-        params.FilterDescendantsInstances={selectionBox}
-        local hit=Workspace:Raycast(ray.Origin,ray.Direction*3000,params)
-        if hit then selectObject(hit.Instance);pickInWorld=false;pickButton.Text="Selecionar no mundo";window.Visible=true end
-        return
-    end
-    if input.KeyCode==Enum.KeyCode.Escape then pickInWorld=false;window.Visible=true;pickButton.Text="Selecionar no mundo";releaseCamera();return end
-    if not window.Visible then return end
+    if input.KeyCode==Enum.KeyCode.Escape then if V5.cancel then V5.cancel() end;pickInWorld=false;window.Visible=true;pickButton.Text="Selecionar no mundo";releaseCamera();return end
+    if not V5.active then return end
+    if V5.busy or V5.drag then return end
     local ctrl=UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
     if ctrl and input.KeyCode==Enum.KeyCode.Z then history(false)
     elseif ctrl and input.KeyCode==Enum.KeyCode.Y then history(true)
@@ -4062,5 +4343,281 @@ connect(RunService.RenderStepped,function()
         timelineInfo.Text=string.format("%d faixas  ·  %.3fs / %.2fs  ·  arraste ◆ para mover",#project.tracks,playhead,project.duration)
     end
 end)
-showPage("Cena");refreshAll();window.Visible=false
-notify("Abra Cena, escolha um alvo e grave duas poses. Exporte JSON antes de sair do Play.")
+-- Workspace V5: o mundo permanece a área principal de trabalho.
+local function installWorkspaceUI()
+    local W={external="desconectado",connections={},touches={},lastPoll=0};V5.workspace=W
+    local toolbar=frame(gui,UDim2.fromOffset(12,48),UDim2.fromOffset(620,82),C.panel);toolbar.Name="SnakeWorkspaceToolbar";toolbar.ZIndex=20;corner(toolbar,10)
+    local title=label(toolbar,"SNAKE 05  /  WORKSPACE",UDim2.fromOffset(10,5),UDim2.new(1,-20,0,24));title.TextColor3=C.accent
+    local dock=frame(gui,UDim2.new(0,10,1,-166),UDim2.new(1,-20,0,154),C.panel);dock.Name="SnakeTimelineDock";dock.ZIndex=20;corner(dock,10)
+    local targetLabel=label(dock,"Toque numa peça na cena",UDim2.fromOffset(10,5),UDim2.new(.7,-12,0,24));targetLabel.TextTruncate=Enum.TextTruncate.AtEnd
+    local miniTime=box(dock,"0",UDim2.new(.7,0,0,5),UDim2.new(.3,-10,0,28));miniTime.PlaceholderText="Tempo da cena"
+    local rulerMini=frame(dock,UDim2.fromOffset(12,80),UDim2.new(1,-24,0,38),C.bg);rulerMini.Name="SnakeScrub";rulerMini.Active=true;corner(rulerMini,6)
+    local marker=frame(rulerMini,UDim2.new(),UDim2.fromOffset(2,38),C.accent);marker.ZIndex=5
+    local keyDots=frame(rulerMini,UDim2.new(),UDim2.fromScale(1,1),C.bg);keyDots.BackgroundTransparency=1
+    local dockStatus=label(dock,"",UDim2.fromOffset(12,124),UDim2.new(1,-24,0,24),true)
+    local function buttonAt(parent,text,index,total,y,fn,accent)
+        return button(parent,text,UDim2.new((index-1)/total,5,0,y),UDim2.new(1/total,-10,0,34),safe(fn),accent)
+    end
+    local function seek(t)
+        assert(not V5.busy and not V5.drag,"Finalize o gesto/bake antes de mudar o tempo")
+        stopPreview(false);previewAt(math.clamp(t,0,project.duration),true);refreshTimeline();V5.dirty=true
+    end
+    local function nextKey(direction)
+        local keys=selectedTrack and selectedTrack.keys or {};local best=direction>0 and project.duration or 0
+        for _,k in ipairs(keys) do if direction>0 and k.t>playhead+1e-6 then best=math.min(best,k.t) elseif direction<0 and k.t<playhead-1e-6 then best=math.max(best,k.t) end end
+        seek(best)
+    end
+    local play=buttonAt(dock,"Play",1,6,39,function() assert(not V5.drag and not V5.busy,"Finalize gesto/bake");playPause() end)
+    buttonAt(dock,"|◀ Key",2,6,39,function() nextKey(-1) end)
+    buttonAt(dock,"Key ▶|",3,6,39,function() nextKey(1) end)
+    buttonAt(dock,"Key transformação",4,6,39,V5.gizmo.keyTransform,true)
+    local auto=buttonAt(dock,"Auto Off",5,6,39,function() assert(not V5.drag,"Finalize o gesto");autoKey=not autoKey;autoButton.Text=autoKey and "Auto-key: On" or "Auto-key: Off" end)
+    buttonAt(dock,"Painel",6,6,39,function() window.Visible=not window.Visible;V5.layout() end)
+    local function uiHit(position)
+        local ok,objects=pcall(function() return playerGui:GetGuiObjectsAtPosition(position.X,position.Y) end)
+        if not ok then return false end
+        for _,o in ipairs(objects) do
+            if o.Visible and (o.Active or o:IsA("GuiButton") or o:IsA("TextBox") or o:IsA("ScrollingFrame") or (o.BackgroundTransparency and o.BackgroundTransparency<1)) then return true end
+        end
+        return false
+    end
+    local function helper(obj)
+        local n=obj
+        while n and n~=game do
+            if n==gui or n==selectionBox or n==gizmoProxy or n.Name=="SnakeEditorVisuals" or n:GetAttribute("SnakeEditorVisual") then return true end
+            n=n.Parent
+        end
+        return false
+    end
+    local function mapTarget(obj)
+        if not obj:IsA("BasePart") then return obj end
+        if V5.targetMode=="rig" then
+            local node=obj.Parent;local first
+            while node and node~=Workspace do
+                if node:IsA("Model") then first=first or node;if node:FindFirstChildOfClass("Humanoid") or node:FindFirstChildOfClass("AnimationController") then return node end end
+                node=node.Parent
+            end
+            return first or obj
+        elseif V5.targetMode=="joint" then
+            local rig=obj:FindFirstAncestorOfClass("Model")
+            if rig then for _,m in ipairs(rig:GetDescendants()) do if m:IsA("Motor6D") and m.Part1==obj then return m end end end
+            error("Esta Part não tem Motor6D de entrada. Use seleção Part ou escolha a junta no Explorer.")
+        end
+        return obj
+    end
+    function W.select(obj,origin)
+        if not alive or not V5.active or V5.locked or V5.drag or V5.busy or playing then return false end
+        if type(obj)=="table" and not obj.IsA then obj=obj[1] end
+        local ok,valid=pcall(function() return obj and obj.Parent and obj:IsA("Instance") and not helper(obj) end)
+        if not ok or not valid then return false end
+        local target=mapTarget(obj)
+        local locOK=pcall(Snake.locate,target);if not locOK then return false end
+        selectObject(target,nil,true)
+        if gizmoMode~="off" then local success=pcall(V5.gizmo.mode,gizmoMode);if not success then gizmoMode="off";gizmoButton.Text="Gizmo: Off" end end
+        V5.pending=nil;V5.dirty=true
+        notify("Selecionado no "..origin..": "..target.Name)
+        return true
+    end
+    function W.pick(position)
+        local cam=Workspace.CurrentCamera;if not cam then return end
+        local ray=cam:ViewportPointToRay(position.X,position.Y)
+        local params=RaycastParams.new();params.FilterType=Enum.RaycastFilterType.Exclude
+        local ignore={selectionBox,gizmoProxy}
+        local visual=Workspace:FindFirstChild("SnakeEditorVisuals");if visual then ignore[#ignore+1]=visual end
+        params.FilterDescendantsInstances=ignore
+        local hit=Workspace:Raycast(ray.Origin,ray.Direction*3000,params)
+        if hit then W.select(hit.Instance,"mundo") end
+    end
+    -- Ponte explícita: adaptadores do Explorer podem enviar Instance ou {Instance,...}.
+    local inputBridge=make("BindableEvent",gui,{Name="SelectionInput"})
+    connect(inputBridge.Event,safe(function(instance)
+        W.external="ponte recebendo";W.select(instance,"Explorer / ponte")
+    end))
+    local function disconnect()
+        for _,c in ipairs(W.connections) do c:Disconnect() end
+        W.connections={};W.provider=nil;W.service=nil;W.lastExternal=nil;W.external="desconectado"
+    end
+    local function pairAdornment(indicator)
+        disconnect();assert(indicator.Parent and not helper(indicator),"Indicador removido ou pertencente ao Snake")
+        W.provider=indicator;W.providerParent=indicator.Parent;W.providerName=indicator.Name;W.providerClass=indicator.ClassName
+        W.external="indicador: "..indicator.Name;W.lastExternal=nil
+        notify("Observando Adornee de "..indicator:GetFullName()..". Selecione no Explorer e confirme o alvo. Não é uma API universal do Studio Lite.")
+    end
+    function W.connectExplorer()
+        choices("Conectar seleção do Explorer",{
+            {label="Observar indicador externo (SelectionBox/Highlight)",value="indicator"},
+            {label="Selection API (somente Studio desktop)",value="studio"},
+            {label="Receber adaptador pela ponte SelectionInput",value="bridge"},
+            {label="Desconectar indicador/API",value="off"}},function(mode)
+            if mode=="off" then disconnect();return end
+            if mode=="bridge" then disconnect();W.external="ponte aguardando adaptador";notify("Ponte: Players.LocalPlayer.PlayerGui.SnakeAnimator.SelectionInput:Fire(instance). Conecte ao callback real do seu Explorer.");return end
+            if mode=="studio" then
+                local service
+                local ok=pcall(function() assert(RunService:IsStudio(),"Não é Studio desktop");service=game:GetService("Selection");service:Get() end)
+                assert(ok,"Selection API indisponível neste cliente. Studio Lite usa seleção própria; tente indicador ou ponte")
+                disconnect();W.service=service;W.external="Selection API";return
+            end
+            local candidates={}
+            for _,root in ipairs({Workspace,playerGui}) do for _,o in ipairs(root:GetDescendants()) do
+                if (o:IsA("SelectionBox") or o:IsA("Highlight")) and not helper(o) then
+                    candidates[#candidates+1]={label=o:GetFullName().." → "..(o.Adornee and o.Adornee.Name or "sem alvo"),value=o}
+                    if #candidates>=100 then break end
+                end
+            end end
+            assert(#candidates>0,"Nenhum indicador externo encontrado. Selecione uma Part no Explorer primeiro; se ele não expõe Adornee, será necessário um adaptador")
+            choices("Escolha o indicador usado PELO EXPLORER",candidates,pairAdornment)
+        end)
+    end
+    local function options()
+        choices("Workspace • preferências",{
+            {label="Seleção: "..(V5.world and "mundo ligado" or "mundo desligado"),value="world"},
+            {label="Alvo: "..V5.targetMode.." (Part / Junta / Rig)",value="target"},
+            {label=V5.locked and "Destravar seleção" or "Travar seleção atual",value="lock"},
+            {label="Conectar Explorer externo",value="external"},
+            {label="Eixos: "..V5.space,value="space"},
+            {label=V5.uniform and "Escala Part: uniforme" or "Escala Part: por eixo",value="uniform"},
+            {label=V5.opposite and "Escala: face oposta fixa" or "Escala: centro fixo",value="pivot"},
+            {label=V5.snap and "Snap espacial: On" or "Snap espacial: Off",value="snap"},
+            {label="Passos: "..V5.moveStep.." studs / "..V5.angleStep.."° / "..V5.scaleStep.." escala",value="steps"},
+            {label=V5.compact and "Layout: painel lateral" or "Layout: janela livre",value="layout"},
+            {label="Gerar JSON editável agora (Ctrl+S)",value="save"}},function(mode)
+            assert(not V5.drag and not V5.busy,"Finalize o gesto/bake")
+            if mode=="world" then V5.world=not V5.world
+            elseif mode=="target" then choices("Selecionar ao tocar numa Part",{{label="Part / MeshPart (Size e CFrame)",value="part"},{label="Junta Motor6D da Part (C0)",value="joint"},{label="Rig / Model inteiro",value="rig"}},function(v) V5.targetMode=v end)
+            elseif mode=="lock" then V5.locked=not V5.locked
+            elseif mode=="external" then W.connectExplorer()
+            elseif mode=="space" then V5.space=V5.space=="local" and "world" or "local"
+            elseif mode=="uniform" then V5.uniform=not V5.uniform
+            elseif mode=="pivot" then V5.opposite=not V5.opposite
+            elseif mode=="snap" then V5.snap=not V5.snap
+            elseif mode=="save" then output(projectJSON(false),"JSON pronto: copie e salve fora da sessão.");showPage("Exportar")
+            elseif mode=="layout" then V5.compact=not V5.compact;V5.layout()
+            elseif mode=="steps" then choices("Precisão dos passos / snap",{{label="Fino: 0.01 studs / 1° / 0.01 escala",value=1},{label="Normal: 0.1 studs / 5° / 0.1 escala",value=2},{label="Largo: 1 stud / 15° / 1 escala",value=3}},function(v)
+                V5.moveStep=({.01,.1,1})[v];V5.angleStep=({1,5,15})[v];V5.scaleStep=({.01,.1,1})[v]
+            end) end
+        end)
+        window.Visible=true;V5.layout()
+    end
+    W.tools={}
+    W.tools.off=buttonAt(toolbar,"Selecionar",1,6,37,function() V5.gizmo.mode("off");V5.world=true;V5.locked=false end)
+    W.tools.move=buttonAt(toolbar,"W Mover",2,6,37,function() V5.gizmo.mode("move") end)
+    W.tools.rotate=buttonAt(toolbar,"E Girar",3,6,37,function() V5.gizmo.mode("rotate") end)
+    W.tools.scale=buttonAt(toolbar,"R Escalar",4,6,37,function() V5.gizmo.mode("scale") end)
+    buttonAt(toolbar,"Opções",5,6,37,options)
+    buttonAt(toolbar,"Viewport",6,6,37,function() window.Visible=false end)
+    -- Painel de conexão visível na antiga aba Cena; seleção interna é apenas fallback.
+    for _,o in ipairs(scene:GetChildren()) do if o:IsA("TextButton") and o.Text=="Atualizar / ver juntas" then o.Position=UDim2.new(.5,4,1,-78) end end
+    button(scene,"Conectar Explorer externo",UDim2.new(.5,4,1,-38),UDim2.new(.5,-4,0,34),safe(W.connectExplorer))
+    function V5.layout()
+        local cam=Workspace.CurrentCamera;local v=cam and cam.ViewportSize or Vector2.new(960,700)
+        local width,height=v.X,v.Y
+        toolbar.Size=UDim2.fromOffset(math.min(620,width-20),82)
+        toolbar.Position=UDim2.fromOffset(math.max(10,(width-math.min(620,width-20))/2),8)
+        dock.Position=UDim2.new(0,10,1,-166);dock.Size=UDim2.new(1,-20,0,154)
+        if V5.compact then
+            window.AnchorPoint=Vector2.new(1,0);window.Position=UDim2.new(1,-10,0,98)
+            window.Size=UDim2.fromOffset(math.max(280,math.min(410,width-20)),math.max(300,height-276))
+        else
+            window.AnchorPoint=Vector2.new(.5,.5);window.Position=UDim2.fromScale(.5,.46)
+            window.Size=UDim2.fromOffset(math.max(280,math.min(1000,width-20)),math.max(310,math.min(700,height-200)))
+        end
+        toolbar.Visible=V5.active;dock.Visible=V5.active
+    end
+    connect(miniTime.FocusLost,safe(function()
+        local n=tonumber(miniTime.Text);assert(n and n==n,"Tempo inválido");seek(n)
+    end))
+    local function scrub(position)
+        local fraction=math.clamp((position.X-rulerMini.AbsolutePosition.X)/math.max(1,rulerMini.AbsoluteSize.X),0,1)
+        seek(snap(fraction*project.duration))
+    end
+    connect(rulerMini.InputBegan,safe(function(input)
+        if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then W.scrub=input;scrub(input.Position) end
+    end))
+    connect(UserInputService.InputChanged,safe(function(input)
+        if W.scrub and (input==W.scrub or input.UserInputType==Enum.UserInputType.MouseMovement and W.scrub.UserInputType==Enum.UserInputType.MouseButton1) then scrub(input.Position) end
+    end))
+    connect(UserInputService.InputBegan,safe(function(input,processed)
+        if input.UserInputType==Enum.UserInputType.Touch then
+            W.touches[input]=true;local n=0;for _ in pairs(W.touches) do n=n+1 end
+            if n>1 and W.pointer then W.pointer.multi=true end
+        end
+        if not V5.active or processed or UserInputService:GetFocusedTextBox() then return end
+        if V5.drag or V5.busy or playing then return end
+        local ctrl=UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
+        if ctrl and input.KeyCode==Enum.KeyCode.S then
+            output(projectJSON(false),"JSON pronto: copie e salve fora da sessão.");showPage("Exportar");window.Visible=true;V5.layout();return
+        end
+        if not ctrl then
+            if input.KeyCode==Enum.KeyCode.W then V5.gizmo.mode("move");return
+            elseif input.KeyCode==Enum.KeyCode.E then V5.gizmo.mode("rotate");return
+            elseif input.KeyCode==Enum.KeyCode.R then V5.gizmo.mode("scale");return
+            elseif input.KeyCode==Enum.KeyCode.Comma then nextKey(-1);return
+            elseif input.KeyCode==Enum.KeyCode.Period then nextKey(1);return end
+        end
+        if (V5.world or pickInWorld) and not V5.locked and (input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch) and not uiHit(input.Position) then
+            local n=0;for _ in pairs(W.touches) do n=n+1 end
+            W.pointer={input=input,start=input.Position,time=os.clock(),multi=n>1}
+        end
+    end))
+    connect(UserInputService.InputEnded,safe(function(input)
+        W.touches[input]=nil
+        if W.scrub and (input==W.scrub or input.UserInputType==Enum.UserInputType.MouseButton1) then W.scrub=nil end
+        local p=W.pointer
+        if p and input==p.input then
+            W.pointer=nil
+            if not V5.drag and not V5.busy and not playing and os.clock()>=(V5.ignorePickUntil or 0) and TransformMath.tap(p.start,input.Position,os.clock()-p.time,p.multi) and not uiHit(input.Position) then
+                W.pick(input.Position);pickInWorld=false;pickButton.Text="Selecionar no mundo"
+            end
+        end
+    end))
+    local function miniRefresh()
+        for _,o in ipairs(keyDots:GetChildren()) do o:Destroy() end
+        local keys=selectedTrack and selectedTrack.keys or {}
+        local stride=math.max(1,math.ceil(#keys/400))
+        for i=1,#keys,stride do
+            local k=keys[i]
+            local b=button(keyDots,"◆",UDim2.new(k.t/project.duration,-9,0,3),UDim2.fromOffset(18,30),safe(function() seek(k.t);selectedKey=k;refreshInspector() end));b.BackgroundTransparency=1;b.TextColor3=C.accent
+        end
+        V5.dirty=false
+    end
+    connect(RunService.RenderStepped,function()
+        if not alive then return end
+        toolbar.Visible=V5.active;dock.Visible=V5.active
+        if not V5.active then return end
+        if selected and not selected.Parent then
+            if V5.drag then V5.gizmo.cancel() end
+            selected=nil;selectedProperty=nil;selectedTrack=nil;selectedKey=nil;selectionBox.Adornee=nil;V5.pending=nil;refreshInspector();V5.dirty=true
+        end
+        marker.Position=UDim2.new(playhead/project.duration,0,0,0)
+        if UserInputService:GetFocusedTextBox()~=miniTime then miniTime.Text=string.format("%.3f",playhead) end
+        targetLabel.Text=selected and (selected.Name.." / "..(selectedProperty or "sem canal")) or "Toque numa peça na cena"
+        play.Text=playing and "Pausar" or "Play";auto.Text=autoKey and "Auto On" or "Auto Off"
+        auto.BackgroundColor3=autoKey and C.accent or C.field;auto.TextColor3=autoKey and C.dark or C.text
+        for mode,b in pairs(W.tools) do b.BackgroundColor3=gizmoMode==mode and C.accent or C.field;b.TextColor3=gizmoMode==mode and C.dark or C.text end
+        dockStatus.Text=string.format("%s • %s • %s • Explorer: %s",V5.targetMode,V5.space,V5.locked and "travado" or "livre",W.external)
+        if V5.dirty then miniRefresh() end
+        if os.clock()-W.lastPoll<.15 then return end;W.lastPoll=os.clock()
+        if V5.busy or V5.drag or playing or V5.locked then return end
+        local ok,err=pcall(function()
+            local target
+            if W.provider then
+                if not W.provider.Parent then
+                    W.provider=W.providerParent and W.providerParent:FindFirstChild(W.providerName)
+                    if not W.provider or W.provider.ClassName~=W.providerClass then W.provider=nil;W.external="indicador perdido: reconecte";return end
+                end
+                local indicator=W.provider
+                if indicator:IsA("SelectionBox") and not indicator.Visible or indicator:IsA("Highlight") and not indicator.Enabled then return end
+                target=indicator.Adornee
+            elseif W.service then target=W.service:Get()[1] end
+            if target and target~=W.lastExternal and W.select(target,"Explorer externo") then W.lastExternal=target end
+        end)
+        if not ok then disconnect();notify("Conexão do Explorer interrompida: "..tostring(err),true) end
+    end)
+    connect(gui.Destroying,function() disconnect();V5.active=false end)
+    if Workspace.CurrentCamera then connect(Workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"),V5.layout) end
+    V5.layout()
+end
+installWorkspaceUI()
+
+showPage("Pose");refreshAll();window.Visible=false
+notify("V5 • Toque na peça no mundo. W/E/R: mover/girar/escalar. Salve o JSON antes de sair.")
