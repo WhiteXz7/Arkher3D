@@ -1607,6 +1607,8 @@ local AI_DEFAULTS = {
 local BRIDGE_CANDIDATES = {
     "http://127.0.0.1:8787",
     "http://localhost:8787",
+    "http://127.0.0.1:8080",
+    "http://10.0.2.2:8787",
 }
 
 local function loadCfg()
@@ -1797,17 +1799,20 @@ local function fetchModels(cfg)
             hdrs = {["Authorization"] = "Bearer " .. cfg.key}
         end
     end
-    local ok, body = pcall(function()
-        return HttpService:GetAsync(url, true, hdrs)
+    -- RequestAsync primeiro: GetAsync com headers falha em algumas builds
+    local body
+    local ok2, resp = pcall(function()
+        return HttpService:RequestAsync({Url = url, Method = "GET", Headers = hdrs})
     end)
-    if not ok then
-        local ok2, resp = pcall(function()
-            return HttpService:RequestAsync({Url = url, Method = "GET", Headers = hdrs})
-        end)
-        if ok2 and type(resp) == "table" and resp.Success then
-            body = resp.Body
+    if ok2 and type(resp) == "table" and resp.Success then
+        body = resp.Body
+    else
+        local ok, b2 = pcall(function() return HttpService:GetAsync(url) end)
+        if ok and b2 then
+            body = b2
         else
-            return nil, "não consegui baixar a lista (" .. tostring(body):sub(1, 90) .. ")"
+            local det = tostring((ok2 and resp and (resp.StatusMessage or resp.StatusCode)) or b2 or "?")
+            return nil, "não consegui baixar a lista (" .. det:sub(1, 80) .. ")"
         end
     end
     local okd, data = pcall(function() return HttpService:JSONDecode(body) end)
@@ -1825,18 +1830,29 @@ local function fetchModels(cfg)
     return out
 end
 
--- procura uma ponte no ar (GET /health -> {"ponte": true})
-local function findBridge()
+-- testa um endereco: devolve (ok, pontelIgada, urlPublica)
+local function probeBase(base)
+    base = tostring(base):gsub("/+$", "")
+    local ok, resp = pcall(function()
+        return HttpService:RequestAsync({Url = base .. "/health", Method = "GET"})
+    end)
+    if not (ok and type(resp) == "table" and resp.Success) then return nil end
+    local okd, d = pcall(function() return HttpService:JSONDecode(resp.Body) end)
+    if not (okd and type(d) == "table" and d.ok) then return nil end
+    return base, (d.ponte == true)
+end
+
+-- procura a ponte: 1) URL salva  2) candidatos locais
+-- OBS: o Roblox costuma BLOQUEAR 127.0.0.1 (HttpError: ConnectFail).
+-- Por isso o caminho recomendado e a URL publica do tunel (tunel.sh).
+local function findBridge(preferred)
+    if preferred and preferred ~= "" then
+        local b, lig = probeBase(preferred)
+        if b then return b, lig end
+    end
     for _, base in ipairs(BRIDGE_CANDIDATES) do
-        local ok, body = pcall(function()
-            return HttpService:GetAsync(base .. "/health")
-        end)
-        if ok and body then
-            local okd, d = pcall(function() return HttpService:JSONDecode(body) end)
-            if okd and type(d) == "table" and d.ok then
-                return base, (d.ponte == true)
-            end
-        end
+        local b, lig = probeBase(base)
+        if b then return b, lig end
     end
     return nil
 end
@@ -1962,10 +1978,15 @@ local TEX_DEFS = {
     pedra        = {style = "stone",  base = {164, 160, 150},  s = 10},
     marmore      = {style = "marble", base = {238, 235, 228},  s = 50},
     tijolo       = {style = "brick",  base = {152, 96, 76},    s = 40},
+    terra        = {style = "earth",  base = {140, 100, 62},   s = 12},
+    palha        = {style = "thatch", base = {196, 168, 96},   s = 33},
     metal        = {style = "metal",  base = {148, 154, 162},  s = 70},
     metal_escuro = {style = "metal",  base = {92, 95, 102},    s = 100},
+    dourado      = {style = "metal",  base = {204, 164, 66},   s = 80},
+    prata        = {style = "metal",  base = {196, 200, 206},  s = 90},
     couro        = {style = "leather", base = {120, 80, 50},   s = 170},
     lona         = {style = "fabric", base = {176, 168, 140},  s = 160},
+    folha        = {style = "grass",  base = {70, 100, 48},    s = 140},
     grama        = {style = "grass",  base = {102, 132, 62},   s = 120},
     areia        = {style = "sand",   base = {198, 180, 142},  s = 130},
     agua         = {style = "water",  base = {54, 116, 158},   s = 150},
@@ -1979,9 +2000,9 @@ local TEX_STYLE_KEY = {
 local MAT_PURE = {vidro = "Glass", neon = "Neon", plastico = "SmoothPlastic"}
 local MAT_FALLBACK = {
     pedra = "Granite", terra = "Granite", palha = "Brick", tijolo = "Brick",
-    marmore = "Marble", basalto = "Basalt", metal = "Metal",
-    metal_escuro = "CorrodedMetal", madeira = "Wood",
-    grama = "Grass", areia = "Sand", lona = "Fabric",
+    marmore = "Marble", basalto = "Basalt", metal = "Metal", dourado = "Gold",
+    prata = "Silver", metal_escuro = "CorrodedMetal", madeira = "Wood",
+    grama = "Grass", areia = "Sand", folha = "Foliage", lona = "Fabric",
     couro = "Leather", agua = "SmoothPlastic", gelo = "Ice",
 }
 
@@ -2088,12 +2109,14 @@ local building = false
 
 local MAT_TO_TEX = {
     [Enum.Material.Wood] = "madeira",
+    [Enum.Material.Slate] = "pedra", [Enum.Material.Granite] = "pedra",
     [Enum.Material.Concrete] = "pedra", [Enum.Material.Basalt] = "basalto",
     [Enum.Material.Brick] = "tijolo",
     [Enum.Material.Marble] = "marmore",
     [Enum.Material.Metal] = "metal", [Enum.Material.CorrodedMetal] = "metal_escuro",
+    [Enum.Material.Gold] = "dourado", [Enum.Material.Silver] = "prata",
     [Enum.Material.Grass] = "grama", [Enum.Material.Sand] = "areia",
-    [Enum.Material.Fabric] = "lona",
+    [Enum.Material.Foliage] = "folha", [Enum.Material.Fabric] = "lona",
     [Enum.Material.Leather] = "couro", [Enum.Material.Ice] = "gelo",
     [Enum.Material.Water] = "agua",
 }
@@ -2201,6 +2224,7 @@ local function setupGui(player)
     local panel = Instance.new("Frame")
     panel.Name = "Panel"
     panel.Size = UDim2.fromOffset(380, 350)
+    panel.ClipsDescendants = true
     panel.Position = UDim2.new(1, -396, 1, -362)
     panel.BackgroundColor3 = Color3.fromRGB(22, 24, 30)
     panel.BackgroundTransparency = 0.08
@@ -2431,7 +2455,7 @@ local function setupGui(player)
 
     pickBtn.MouseButton1Click:Connect(function()
         pickPanel.Visible = true
-        pickSearch.Text = modelField.Text
+        pickSearch.Text = ""
         if #pickAll > 0 then
             renderPick(pickSearch.Text)
             return
@@ -2729,7 +2753,7 @@ local function setupGui(player)
         if key == "" and (base == "" or isBridge(base)) then
             setupErr.Text = "procurando a ponte..."
             task.spawn(function()
-                local found, ligada = findBridge()
+                local found, ligada = findBridge(base)
                 if found then
                     saveCfg({key = "", model = "auto", base = found})
                     setupErr.Text = ""
@@ -2741,7 +2765,7 @@ local function setupGui(player)
                         addMsg("⚠️ Server achado em " .. found .. ", mas a PONTE esta DESLIGADA.\nAbra " .. found .. "/puter no navegador, cole o token do Puter e toque em LIGAR (modo AUTO).", Color3.fromRGB(250, 200, 90))
                     end
                 else
-                    setupErr.Text = "ponte nao encontrada — rode o server e tente de novo"
+                    setupErr.Text = "nao achei a ponte. O Roblox bloqueia 127.0.0.1 — rode ./tunel.sh e cole aqui a URL https que aparecer"
                 end
             end)
             return
