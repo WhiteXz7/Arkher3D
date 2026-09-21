@@ -1,5 +1,5 @@
 /* ============================================================
-   AUTH — login real via Supabase (e-mail + senha).
+   AUTH â€” login real via Supabase (e-mail + senha).
    Acesso restrito: so os e-mails da lista ALLOW entram.
    Sem backend proprio; o Supabase faz a verificacao.
    ============================================================ */
@@ -8,7 +8,23 @@ if (typeof LS === 'undefined' && typeof require !== 'undefined') { globalThis.LS
 
 const Auth = {
   cfg() { return LS.get('arkher_supabase', { url: '', anon: '' }); },
-  setCfg(url, anon) { LS.set('arkher_supabase', { url: String(url || '').replace(/\/+$/, ''), anon: anon || '' }); },
+  // conserta os erros comuns: url do painel, falta de https, barra no fim
+  normalizar(u) {
+    u = String(u || '').trim().replace(/\/+$/, '');
+    if (!u) return '';
+    // https://supabase.com/dashboard/project/REF  ->  https://REF.supabase.co
+    var m = u.match(/supabase\.com\/dashboard\/project\/([a-z0-9]+)/i);
+    if (m) return 'https://' + m[1] + '.supabase.co';
+    // colou so o ref
+    if (/^[a-z0-9]{15,}$/i.test(u)) return 'https://' + u + '.supabase.co';
+    if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+    // tira sufixos de API que o painel mostra: /rest/v1, /auth/v1, /storage/v1...
+    u = u.replace(/\/(rest|auth|storage|realtime|functions)\/v\d+\/?.*$/i, '');
+    return u.replace(/\/+$/, '');
+  },
+  setCfg(url, anon) {
+    LS.set('arkher_supabase', { url: this.normalizar(url), anon: (anon || '').trim() });
+  },
 
   /** quem pode entrar (lido na hora, nao na carga do arquivo) */
   get ALLOW() { return LS.get('arkher_allow', []); },
