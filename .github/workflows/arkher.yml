@@ -32,6 +32,7 @@ jobs:
           restore-keys: nexus-state-
 
       - name: Preparar
+        timeout-minutes: 3
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path arkher_state\work | Out-Null
@@ -70,6 +71,7 @@ jobs:
           echo "RDP_PW=$pw" >> $env:GITHUB_ENV
 
       - name: Tailscale
+        timeout-minutes: 8
         shell: pwsh
         run: |
           $p="$env:TEMP\ts.msi"
@@ -85,6 +87,7 @@ jobs:
 
       # ---------- 3. programas nativos (o ganho do Windows) ----------
       - name: Instalar Blender, ffmpeg, git
+        timeout-minutes: 12
         continue-on-error: true
         shell: pwsh
         run: |
@@ -93,36 +96,50 @@ jobs:
 
       - name: Instalar Roblox Studio
         continue-on-error: true
+        timeout-minutes: 6
         shell: pwsh
         run: |
-          # Studio instala sem login; abrir arquivo .rbxl exige conta.
+          # O launcher do Roblox NUNCA retorna: ele instala e fica rodando.
+          # Por isso NAO usamos -Wait. Solta, espera um pouco e segue.
           try {
             Invoke-WebRequest "https://setup.rbxcdn.com/RobloxStudioLauncherBeta.exe" `
-              -OutFile "$env:TEMP\studio.exe" -UseBasicParsing
-            Start-Process "$env:TEMP\studio.exe" -ArgumentList "/S" -Wait -ErrorAction SilentlyContinue
-            Write-Host "Studio: instalador executado"
-          } catch { Write-Host "Studio nao instalou: $_" }
-
+              -OutFile "$env:TEMP\studio.exe" -UseBasicParsing -TimeoutSec 120
+            $p = Start-Process "$env:TEMP\studio.exe" -PassThru -ErrorAction SilentlyContinue
+            Write-Host "launcher solto (pid $($p.Id)) — aguardando 150s"
+            Start-Sleep 150
+            # mata o launcher: o que importa (os arquivos) ja foi baixado
+            Get-Process RobloxStudioLauncherBeta,RobloxStudioBeta,RobloxPlayerBeta `
+              -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            $v = "$env:LOCALAPPDATA\Roblox\Versions"
+            if (Test-Path $v) {
+              Write-Host "Studio instalado:"
+              Get-ChildItem $v -Filter RobloxStudioBeta.exe -Recurse -ErrorAction SilentlyContinue |
+                Select-Object -First 1 -Expand FullName
+            } else {
+              Write-Host "Studio nao apareceu — instale pelo RDP depois. Nao trava nada."
+            }
+          } catch { Write-Host "pulando Studio: $_" }
 
       # ---------- SESSAO GRAFICA (sem isso o print sai preto) ----------
       - name: Ativar sessao grafica para o Piloto
         continue-on-error: true
+        timeout-minutes: 3
         shell: pwsh
         run: |
-          # autologon do usuario nexus: cria sessao de console de verdade
           $k='HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
           Set-ItemProperty $k AutoAdminLogon 1 -Force
           Set-ItemProperty $k DefaultUserName "nexus" -Force
           Set-ItemProperty $k DefaultPassword "$env:RDP_PW" -Force
-          # nunca dormir / nunca bloquear a tela
           powercfg /change monitor-timeout-ac 0
           powercfg /change standby-timeout-ac 0
+          New-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization' -Force -ErrorAction SilentlyContinue | Out-Null
           Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization' NoLockScreen 1 -Force -ErrorAction SilentlyContinue
           Write-Host "autologon armado — apos o 1o RDP rode: tscon 1 /dest:console"
           quser 2>&1 | Out-String | Write-Host
 
       # ---------- 4. o agente ----------
       - name: Subir agente
+        timeout-minutes: 5
         shell: pwsh
         run: |
           $env:ARKHER_STATE="$PWD\arkher_state"
