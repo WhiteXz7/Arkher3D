@@ -1,0 +1,8 @@
+node_modules/
+arkher_state/
+*.log
+*.bak
+shot.jpg
+shot.png
+.DS_Store
+Thumbs.db

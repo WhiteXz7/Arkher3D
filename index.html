@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ARKHER AI</title>
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#12151d; --panel2:#171b26; --line:#232838;
+    --tx:#e8ecf5; --dim:#8b93a7; --acc:#6c8cff; --acc2:#39d0a8;
+    --warn:#f5a524; --err:#ff6b6b; --ok:#39d0a8;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--tx);
+    font:15px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Inter,sans-serif;
+    display:flex;flex-direction:column;overflow:hidden}
+  .ico{width:18px;height:18px;flex:0 0 auto;stroke:currentColor;fill:none;
+    stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+
+  header{display:flex;align-items:center;gap:10px;padding:10px 14px;
+    background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto}
+  .logo{display:flex;align-items:center;gap:9px;font-weight:650;letter-spacing:.2px}
+  .logo .mark{width:28px;height:28px;border-radius:8px;
+    background:linear-gradient(135deg,var(--acc),var(--acc2));
+    display:grid;place-items:center;color:#0b0d12}
+  .sp{flex:1}
+  .chip{display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;
+    background:var(--panel2);border:1px solid var(--line);font-size:12px;color:var(--dim);
+    white-space:nowrap;max-width:46vw;overflow:hidden;text-overflow:ellipsis}
+  .chip b{color:var(--tx);font-weight:600}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--dim);flex:0 0 auto}
+  .dot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .dot.bad{background:var(--err)}
+  .dot.work{background:var(--warn);animation:pulse 1s infinite}
+  @keyframes pulse{50%{opacity:.35}}
+  button{font:inherit;color:var(--tx);background:var(--panel2);border:1px solid var(--line);
+    border-radius:10px;padding:8px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:7px}
+  button:hover{border-color:#31384d}
+  button.pri{background:linear-gradient(135deg,var(--acc),#5a78e8);border:0;font-weight:600}
+  button.ghost{background:transparent}
+  .iconbtn{padding:8px;border-radius:9px}
+
+  .tabs{display:flex;gap:4px;padding:8px 12px 0;background:var(--panel);
+    border-bottom:1px solid var(--line);flex:0 0 auto;overflow-x:auto}
+  .tab{padding:8px 14px;border-radius:9px 9px 0 0;border:1px solid transparent;
+    border-bottom:0;color:var(--dim);cursor:pointer;display:flex;align-items:center;gap:7px;
+    white-space:nowrap;font-size:14px}
+  .tab.on{background:var(--bg);border-color:var(--line);color:var(--tx);margin-bottom:-1px}
+
+  main{flex:1;min-height:0;display:flex}
+  .view{flex:1;min-height:0;display:none;flex-direction:column}
+  .view.on{display:flex}
+
+  #log{flex:1;overflow-y:auto;padding:18px 14px 8px;scroll-behavior:smooth}
+  .msg{max-width:860px;margin:0 auto 16px;display:flex;gap:11px}
+  .av{width:28px;height:28px;border-radius:8px;flex:0 0 auto;display:grid;place-items:center;
+    background:var(--panel2);border:1px solid var(--line);color:var(--dim)}
+  .msg.me .av{background:#243056;border-color:#2f3d6b;color:#aab8ff}
+  .bub{flex:1;min-width:0}
+  .who{font-size:11.5px;color:var(--dim);margin-bottom:3px;display:flex;gap:8px;align-items:center}
+  .body{white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere}
+  .body code{background:#0e1118;border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:13px}
+  .body pre{background:#0e1118;border:1px solid var(--line);border-radius:10px;
+    padding:11px 12px;overflow-x:auto;margin:9px 0}
+  .body pre code{background:0;border:0;padding:0}
+  .tag{font-size:10.5px;padding:2px 7px;border-radius:999px;background:var(--panel2);
+    border:1px solid var(--line);color:var(--dim)}
+  .err{color:var(--err)}
+
+  .composer{flex:0 0 auto;border-top:1px solid var(--line);background:var(--panel);padding:10px 12px}
+  .cin{max-width:860px;margin:0 auto;display:flex;gap:9px;align-items:flex-end}
+  textarea{flex:1;resize:none;min-height:46px;max-height:180px;background:var(--panel2);
+    color:var(--tx);border:1px solid var(--line);border-radius:12px;padding:12px 13px;font:inherit}
+  textarea:focus{outline:0;border-color:var(--acc)}
+
+  /* sandbox */
+  .term{flex:1;min-height:0;display:flex;flex-direction:column;background:#07090d}
+  .tbar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--panel);
+    border-bottom:1px solid var(--line);flex:0 0 auto;overflow-x:auto}
+  #term{flex:1;overflow-y:auto;padding:12px 14px;font:13px/1.5 ui-monospace,Menlo,Consolas,monospace;
+    white-space:pre-wrap;word-break:break-word}
+  .tin{display:flex;gap:8px;padding:9px 12px;background:var(--panel);border-top:1px solid var(--line)}
+  .tin input{flex:1;background:#0e1118;color:var(--tx);border:1px solid var(--line);
+    border-radius:9px;padding:10px 12px;font:13px ui-monospace,Menlo,Consolas,monospace}
+  .tin input:focus{outline:0;border-color:var(--acc)}
+  .l-cmd{color:#8fb3ff}.l-out{color:#cfd6e6}.l-err{color:#ff8b8b}
+  .l-ok{color:#5fe0bb}.l-sys{color:#7b8499}
+
+  /* paineis */
+  .pane{max-width:860px;margin:0 auto;padding:20px 14px;overflow-y:auto;width:100%}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+  .card h3{margin:0 0 4px;font-size:15px;display:flex;align-items:center;gap:8px}
+  .card p{margin:0 0 12px;color:var(--dim);font-size:13.5px}
+  label{display:block;font-size:12.5px;color:var(--dim);margin:10px 0 5px}
+  input[type=text],input[type=password],select{width:100%;background:var(--panel2);color:var(--tx);
+    border:1px solid var(--line);border-radius:10px;padding:11px 12px;font:inherit}
+  input:focus,select:focus{outline:0;border-color:var(--acc)}
+  .row{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}
+  .stat{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+  .stat:last-child{border:0}
+  .stat b{color:var(--acc2);font-weight:600}
+  .hint{font-size:12.5px;color:var(--dim);margin-top:8px;line-height:1.6}
+  a{color:var(--acc)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px;margin-top:10px}
+  .itile{background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:12px;
+    display:flex;flex-direction:column;gap:7px;cursor:pointer}
+  .itile:hover{border-color:var(--acc)}
+  .itile .nm{font-size:13.5px;font-weight:600}
+  .itile .ds{font-size:11.5px;color:var(--dim)}
+  @media(max-width:560px){.chip.hide-sm{display:none}}
+
+.pilot-wrap{display:flex;height:100%;gap:0;overflow:hidden}
+.pilot-screen{flex:1 1 62%;display:flex;flex-direction:column;background:#0a0d14;min-width:0}
+.pilot-bar{display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid var(--line);background:var(--panel)}
+.pilot-bar .grow{flex:1}
+.pilot-bar .dot{width:8px;height:8px;border-radius:50%;background:#556;flex:none}
+.pilot-bar .dot.on{background:#3ddc84;box-shadow:0 0 6px #3ddc84}
+.pilot-bar b{font-size:12px;font-weight:600;color:var(--dim)}
+.mini{padding:5px 9px;font-size:11px;border-radius:6px;border:1px solid var(--line);background:var(--chip);color:var(--fg);cursor:pointer}
+.mini:hover{border-color:var(--acc)}
+.mini.danger{border-color:#7a2b2b;color:#ff9b9b}
+.pilot-view{flex:1;display:flex;align-items:center;justify-content:center;overflow:auto;padding:10px;position:relative}
+.pilot-view img{max-width:100%;max-height:100%;border-radius:8px;border:1px solid var(--line);cursor:crosshair;display:block}
+.pilot-empty{text-align:center;color:var(--dim);max-width:380px}
+.pilot-empty .ico.big{width:42px;height:42px;opacity:.35;margin-bottom:10px}
+.pilot-chat{flex:0 0 38%;max-width:460px;display:flex;flex-direction:column;border-left:1px solid var(--line);background:var(--panel);min-width:0}
+.pilot-log{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
+.pl-msg{font-size:13px;line-height:1.5;padding:9px 11px;border-radius:9px;background:var(--chip);border:1px solid var(--line);word-wrap:break-word}
+.pl-msg.sys{color:var(--dim)}
+.pl-msg.me{background:var(--acc);color:#fff;border-color:transparent;align-self:flex-end;max-width:90%}
+.pl-msg.think{border-left:2px solid var(--acc);background:transparent}
+.pl-msg.act{font-family:ui-monospace,monospace;font-size:11px;color:#8fd3ff;background:#0d1520}
+.pl-msg.done{border-left:2px solid #3ddc84}
+.pl-msg.err{border-left:2px solid #e05252;color:#ff9b9b}
+.pl-step{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--dim);margin-bottom:3px}
+.pl-ex{display:flex;flex-direction:column;gap:4px;margin-top:8px}
+.chip-ex{text-align:left;font-size:11px;padding:6px 8px;border-radius:6px;border:1px dashed var(--line);background:transparent;color:var(--dim);cursor:pointer}
+.chip-ex:hover{border-color:var(--acc);color:var(--fg)}
+.pilot-in{padding:10px;border-top:1px solid var(--line);display:flex;gap:6px;align-items:flex-end}
+.pilot-in textarea{flex:1;resize:none;background:var(--chip);border:1px solid var(--line);border-radius:8px;color:var(--fg);padding:8px;font:inherit;font-size:13px}
+@media(max-width:900px){.pilot-wrap{flex-direction:column}.pilot-chat{flex:1;max-width:none;border-left:0;border-top:1px solid var(--line)}}
+</style>
+</head>
+<body>
+
+<svg style="display:none">
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H11l-1 8.5 8.5-11.5H12z"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-6.5A8 8 0 0 1 11 4h2a8 8 0 0 1 8 8z"/></symbol>
+  <symbol id="i-term" viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="16" rx="2.5"/><path d="m7 9 3 3-3 3M13 15h4"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0zM12 17v5"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 14.5a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5v.2a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1.1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H2a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 3.7 8.4a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H8a1.6 1.6 0 0 0 1-1.5V2a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V8a1.6 1.6 0 0 0 1.5 1h.2a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></symbol>
+  <symbol id="i-stack" viewBox="0 0 24 24"><path d="m12 2 9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m4 12.5 5 5L20 6.5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 3.5 20 12 6 20.5z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 15h10l1-15"/></symbol>
+  <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 0 0 .5-8.97 6 6 0 0 0-11.6-1.4A4.5 4.5 0 0 0 6.5 19z"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z"/><path d="M14 2v5h5"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+  <symbol id="i-cube" viewBox="0 0 24 24"><path d="m12 2 9 5v10l-9 5-9-5V7z"/><path d="m12 12 9-5M12 12v10M12 12 3 7"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9 3 3-3 3-2-2-2 2"/></symbol>
+  <symbol id="i-screen" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></symbol><symbol id="i-eye" viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+</svg>
+
+<div id="gate" style="position:fixed;inset:0;z-index:99;background:var(--bg);display:none;
+     align-items:center;justify-content:center;padding:20px">
+  <div style="width:100%;max-width:380px">
+    <div style="display:flex;align-items:center;gap:10px;justify-content:center;margin-bottom:22px">
+      <span class="mark" style="width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--acc),var(--acc2));display:grid;place-items:center;color:#0b0d12">
+        <svg class="ico" style="width:19px;height:19px;stroke-width:2.2"><use href="#i-bolt"/></svg></span>
+      <span style="font-size:21px;font-weight:650">ARKHER <span style="color:var(--acc2);font-weight:500">AI</span></span>
+    </div>
+    <div class="card">
+      <h3><svg class="ico"><use href="#i-lock"/></svg>Acesso restrito</h3>
+      <p>Somente contas autorizadas.</p>
+      <label>E-mail</label><input type="text" id="g-mail" placeholder="voce@email.com" autocomplete="username">
+      <label>Senha</label><input type="password" id="g-pass" placeholder="sua senha" autocomplete="current-password">
+      <div class="row">
+        <button class="pri" id="g-in" style="flex:1"><svg class="ico"><use href="#i-check"/></svg>Entrar</button>
+        <button id="g-up" class="ghost">Criar conta</button>
+      </div>
+      <div class="hint" id="g-msg"></div>
+    </div>
+    <div class="card">
+      <h3><svg class="ico"><use href="#i-gear"/></svg>Configurar Supabase</h3>
+      <p>Uma vez só. Grátis em supabase.com.</p>
+      <label>Project URL</label><input type="text" id="g-url" placeholder="https://xxxx.supabase.co">
+      <label>anon public key</label><input type="password" id="g-anon" placeholder="eyJ…">
+      <label>E-mails com acesso (vírgula)</label><input type="text" id="g-allow" placeholder="voce@x.com, amigo@y.com">
+      <div class="row"><button id="g-save"><svg class="ico"><use href="#i-check"/></svg>Salvar</button></div>
+      <div class="hint">Supabase → Settings → API. Deixe a lista de e-mails vazia só no primeiro acesso.</div>
+    </div>
+  </div>
+</div>
+
+<header>
+  <div class="logo"><span class="mark"><svg class="ico" style="width:16px;height:16px;stroke-width:2.2"><use href="#i-bolt"/></svg></span>ARKHER</div>
+  <div class="sp"></div>
+  <div class="chip hide-sm"><span class="dot" id="d-net"></span><span id="s-models">carregando…</span></div>
+  <div class="chip hide-sm" title="quem esta online"><svg class="ico" style="width:14px;height:14px"><use href="#i-user"/></svg><b id="s-crew">—</b></div>
+  <div class="chip"><span class="dot" id="d-cur"></span><b id="s-cur">—</b></div>
+  <button class="iconbtn ghost" id="b-out" title="Sair"><svg class="ico"><use href="#i-lock"/></svg></button>
+  <button class="iconbtn ghost" id="b-cfg" title="Configurações"><svg class="ico"><use href="#i-gear"/></svg></button>
+</header>
+
+<div class="tabs">
+  <div class="tab on" data-v="chat"><svg class="ico"><use href="#i-chat"/></svg>Chat</div>
+  <div class="tab" data-v="term"><svg class="ico"><use href="#i-term"/></svg>Sandbox</div>
+  <div class="tab" data-v="skills"><svg class="ico"><use href="#i-spark"/></svg>Capacidades</div>
+  <div class="tab" data-v="tri"><svg class="ico"><use href="#i-cube"/></svg>3D</div>
+  <div class="tab" data-v="vm"><svg class="ico"><use href="#i-screen"/></svg>VM</div>
+  <div class="tab" data-v="pilot"><svg class="ico"><use href="#i-eye"/></svg>Piloto</div>
+  <div class="tab" data-v="integ"><svg class="ico"><use href="#i-plug"/></svg>Integrações</div>
+  <div class="tab" data-v="cfg"><svg class="ico"><use href="#i-gear"/></svg>Config</div>
+</div>
+
+<main>
+
+  <!-- PILOTO: a IA ve a tela e opera a VM -->
+  <section class="view" id="v-pilot">
+    <div class="pilot-wrap">
+      <div class="pilot-screen">
+        <div class="pilot-bar">
+          <span class="dot" id="pl-dot"></span>
+          <b id="pl-st">desconectado</b>
+          <span class="grow"></span>
+          <button id="pl-open-rbx" class="mini">Abrir Roblox Studio</button>
+          <button id="pl-open-bl" class="mini">Blender</button>
+          <button id="pl-refresh" class="mini">Atualizar tela</button>
+          <button id="pl-live" class="mini">Ao vivo</button>
+          <button id="pl-stop" class="mini danger" style="display:none">Parar</button>
+        </div>
+        <div class="pilot-view" id="pl-view">
+          <div class="pilot-empty" id="pl-empty">
+            <svg class="ico big"><use href="#i-eye"/></svg>
+            <p>A tela da VM aparece aqui.</p>
+            <p class="hint">Configure a URL do agente na aba VM e clique em <b>Atualizar tela</b>.<br>
+            Você também pode clicar direto na imagem para controlar o mouse.</p>
+          </div>
+          <img id="pl-img" alt="tela da VM" style="display:none">
+        </div>
+      </div>
+
+      <div class="pilot-chat">
+        <div class="pilot-log" id="pl-log">
+          <div class="pl-msg sys">Diga o que quer que eu faça na VM. Eu olho a tela e opero sozinho.
+            <div class="pl-ex">
+              <button class="chip-ex">Abre o Roblox Studio e cria um baseplate novo</button>
+              <button class="chip-ex">Abre o Blender e salva um cubo em cube.blend</button>
+              <button class="chip-ex">Abre o explorador na pasta de trabalho</button>
+            </div>
+          </div>
+        </div>
+        <div class="pilot-in">
+          <textarea id="pl-inp" rows="2" placeholder="Ex: abre o Roblox Studio, cria um lugar novo e coloca 3 blocos…"></textarea>
+          <button class="pri" id="pl-go"><svg class="ico"><use href="#i-send"/></svg>Executar</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CHAT -->
+  <section class="view on" id="v-chat">
+    <div id="log"></div>
+    <div class="composer"><div class="cin">
+      <textarea id="inp" rows="1" placeholder="Pergunte qualquer coisa…"></textarea>
+      <button class="pri" id="b-send"><svg class="ico"><use href="#i-send"/></svg>Enviar</button>
+    </div></div>
+  </section>
+
+  <!-- SANDBOX -->
+  <section class="view" id="v-term">
+    <div class="term">
+      <div class="tbar">
+        <span class="chip"><span class="dot" id="d-rdp"></span><b id="s-rdp">desconectado</b></span>
+        <button id="b-conn"><svg class="ico"><use href="#i-cloud"/></svg>Conectar</button>
+        <button id="b-clear" class="ghost"><svg class="ico"><use href="#i-trash"/></svg>Limpar</button>
+        <div class="sp"></div>
+        <button id="b-save" class="ghost"><svg class="ico"><use href="#i-file"/></svg>Salvar sessão</button>
+      </div>
+      <div id="term"></div>
+      <div class="tin">
+        <input id="cmd" placeholder="comando…  (ex.: python -V   |   ia: crie um cubo no blender)" autocomplete="off">
+        <button class="pri" id="b-run"><svg class="ico"><use href="#i-play"/></svg></button>
+      </div>
+    </div>
+  </section>
+
+  <!-- INTEGRAÇÕES -->
+  <section class="view" id="v-integ"><div class="pane">
+    <div class="card">
+      <h3><svg class="ico"><use href="#i-plug"/></svg>Integrações</h3>
+      <p>O ARKHER fala com qualquer serviço que aceite HTTP. Toque para inserir um modelo de chamada no Sandbox.</p>
+      <div class="grid" id="g-integ"></div>
+    </div>
+    <div class="card">
+      <h3><svg class="ico"><use href="#i-cpu"/></svg>Chamada HTTP livre</h3>
+      <p>Qualquer API, qualquer método. Use no Sandbox: <code>http GET https://…</code></p>
+      <div class="hint">O navegador respeita CORS. APIs que bloqueiam origem externa precisam do agente no seu PC (aba Sandbox) — ele executa sem essa limitação.</div>
+    </div>
+  </div></section>
+
+  <!-- CAPACIDADES -->
+  <section class="view" id="v-skills"><div class="pane">
+    <div class="card">
+      <h3><svg class="ico"><use href="#i-spark"/></svg>Capacidades compartilhadas</h3>
+      <p>Um modelo só na frente; atrás, todos. Qualquer IA da cascata usa TODAS estas ferramentas — inclusive as que ela sozinha não teria.</p>
+      <div class="grid" id="g-skills"></div>
+    </div>
+    <div class="card">
+      <h3><svg class="ico"><use href="#i-stack"/></svg>Melhor modelo por tarefa (hoje)</h3>
+      <p>Consulto o ranking do Hub na hora — nada fixo no código.</p>
+      <label>Tarefa</label>
+      <select id="sk-task">
+        <option value="text-to-3d">text-to-3d</option>
+        <option value="image-to-3d">image-to-3d</option>
+        <option value="text-to-image">text-to-image</option>
+        <option value="text-to-video">text-to-video</option>
+        <option value="text-to-speech">text-to-speech</option>
+        <option value="automatic-speech-recognition">speech-to-text</option>
+        <option value="text-generation">text-generation</option>
+      </select>
+      <div class="row"><button class="pri" id="sk-go"><svg class="ico"><use href="#i-stack"/></svg>Buscar</button></div>
+      <div id="sk-out" class="hint"></div>
+    </div>
+  </div></section>
+
+  <!-- 3D -->
+  <section class="view" id="v-tri"><div class="pane">
+    <div class="card">
+      <h3><svg class="ico"><use href="#i-cube"/></svg>Gerar 3D</h3>
+      <p>Escolho o melhor motor do Hub e rodo na VM. TRELLIS, Hunyuan3D, TripoSR e afins.</p>
+      <label>O que criar</label>
+      <input type="text" id="t3-p" placeholder="uma espada medieval detalhada">
+      <label>Motor</label>
+      <select id="t3-eng"><option value="auto">automático (melhor de hoje)</option></select>
+      <div class="row">
+        <button class="pri" id="t3-go"><svg class="ico"><use href="#i-play"/></svg>Gerar</button>
+        <button id="t3-setup" class="ghost"><svg class="ico"><use href="#i-cloud"/></svg>Instalar na VM</button>
+      </div>
+      <div id="t3-out" class="hint"></div>
+    </div>
+    <div class="card">
+      <h3><svg class="ico"><use href="#i-file"/></svg>Saídas</h3>
+      <p>Arquivos gerados em <code>arkher_state_dir/work</code> na VM.</p>
+      <div class="row"><button id="t3-ls"><svg class="ico"><use href="#i-file"/></svg>Listar</button></div>
+      <div id="t3-files" class="hint"></div>
+    </div>
+  </div></section>
+
+  <!-- VM -->
+  <section class="view" id="v-vm"><div class="pane">
+    <div class="card">
+      <h3><svg class="ico"><use href="#i-screen"/></svg>Máquina</h3>
+      <p>Windows real: Roblox Studio, Blender, o que você instalar.</p>
+      <div class="stat"><span>Processador</span><b id="vm-cpu">—</b></div>
+      <div class="stat"><span>Memória</span><b id="vm-ram">—</b></div>
+      <div class="stat"><span>Núcleos</span><b id="vm-cores">—</b></div>
+      <div class="stat"><span>Disco livre</span><b id="vm-disk">—</b></div>
+      <div class="stat"><span>Ligada há</span><b id="vm-up">—</b></div>
+      <div class="row"><button id="vm-ref"><svg class="ico"><use href="#i-cpu"/></svg>Atualizar</button></div>
+    </div>
+    <div class="card">
+      <h3><svg class="ico"><use href="#i-user"/></svg>Equipe — VM compartilhada</h3>
+      <p>Os dois controlam a MESMA máquina, cada um na sua conta. Quem salvar o endereço aqui publica pro outro.</p>
+      <div class="stat"><span>Endereço em uso</span><b id="crew-url">—</b></div>
+      <div class="stat"><span>Publicado por</span><b id="crew-by">—</b></div>
+      <div class="stat"><span>Online agora</span><b id="crew-on">—</b></div>
+      <div class="stat"><span>Controle</span><b id="crew-lock">livre</b></div>
+      <div class="row">
+        <button class="pri" id="crew-pub"><svg class="ico"><use href="#i-cloud"/></svg>Publicar minha VM</button>
+        <button id="crew-pull" class="ghost"><svg class="ico"><use href="#i-check"/></svg>Usar a do time</button>
+      </div>
+      <div class="hint" id="crew-msg"></div>
+    </div>
+    <div class="card">
+      <h3><svg class="ico"><use href="#i-term"/></svg>Atividade do time</h3>
+      <p>O que cada um rodou na VM.</p>
+      <div id="crew-log" class="hint" style="font-family:ui-monospace,monospace;font-size:12px"></div>
+    </div>
+    <div class="card">
+      <h3><svg class="ico"><use href="#i-screen"/></svg>Tela remota (Roblox Studio)</h3>
+      <p>O navegador não fala RDP direto. Use um destes:</p>
+      <div class="hint" style="line-height:1.9">
+        <b>Celular/PC:</b> app <b>Remote Desktop</b> (Microsoft) → endereço Tailscale, usuário <code>nexus</code><br>
+        <b>Só navegador:</b> ative o noVNC na VM e abra aqui dentro
+      </div>
+      <div class="row">
+        <button id="vm-vnc"><svg class="ico"><use href="#i-play"/></svg>Ativar noVNC</button>
+        <button id="vm-open" class="ghost"><svg class="ico"><use href="#i-screen"/></svg>Abrir tela</button>
+      </div>
+      <div id="vm-vncout" class="hint"></div>
+    </div>
+    <div class="card">
+      <h3><svg class="ico"><use href="#i-cloud"/></svg>Armazenamento</h3>
+      <p>Enviar resultados pra nuvem (Drive, MediaFire) usando rclone na VM.</p>
+      <div class="row">
+        <button id="vm-rclone"><svg class="ico"><use href="#i-cloud"/></svg>Instalar rclone</button>
+        <button id="vm-push" class="ghost">Enviar work/</button>
+      </div>
+      <div id="vm-cloud" class="hint"></div>
+    </div>
+  </div></section>
+
+  <!-- CONFIG -->
+  <section class="view" id="v-cfg"><div class="pane">
+    <div class="card">
+      <h3><svg class="ico"><use href="#i-stack"/></svg>Modelos — cascata dupla</h3>
+      <p>Lista 1 esgotada, cai na lista 2. Nenhuma lista fixa: leio os catálogos vivos.</p>
+      <div class="stat"><span>Lista 1 · Puter</span><b id="n-puter">—</b></div>
+      <div class="stat"><span>Lista 2 · Hugging Face</span><b id="n-hf">—</b></div>
+      <div class="stat"><span>Total na cascata</span><b id="n-tot">—</b></div>
+      <div class="stat"><span>Em quarentena</span><b id="n-ban">0</b></div>
+      <div class="row">
+        <button id="b-reload"><svg class="ico"><use href="#i-stack"/></svg>Recarregar</button>
+        <button id="b-unban" class="ghost"><svg class="ico"><use href="#i-check"/></svg>Limpar quarentena</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3><svg class="ico"><use href="#i-key"/></svg>Cofre de tokens</h3>
+      <p>Cadastre os tokens das SUAS contas. Quando um esgota, passo pro próximo sozinho. Todos voltam a valer no dia seguinte.</p>
+      <label>Provedor</label>
+      <select id="v-prov"><option value="hf">Hugging Face</option><option value="puter">Puter</option></select>
+      <label>Token</label><input type="password" id="v-tok" placeholder="hf_… ">
+      <label>Apelido</label><input type="text" id="v-lab" placeholder="conta 1">
+      <div class="row"><button class="pri" id="v-add"><svg class="ico"><use href="#i-check"/></svg>Adicionar</button></div>
+      <div id="v-list" class="hint"></div>
+    </div>
+    <div class="card">
+      <h3><svg class="ico"><use href="#i-cloud"/></svg>Hugging Face (lista 2)</h3>
+      <p>Grátis. Sem o token, a lista 2 fica desligada e só o Puter é usado.</p>
+      <label>Token HF</label>
+      <input type="password" id="f-hf" placeholder="hf_…">
+      <div class="hint">Pegue em <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener">huggingface.co/settings/tokens</a> → New token → tipo <b>Read</b>. Fica salvo só neste navegador.</div>
+      <div class="row"><button class="pri" id="b-savehf"><svg class="ico"><use href="#i-check"/></svg>Salvar</button></div>
+    </div>
+    <div class="card">
+      <h3><svg class="ico"><use href="#i-term"/></svg>Agente do PC (Sandbox)</h3>
+      <p>Endereço Tailscale do seu Windows. O agente executa os comandos de verdade.</p>
+      <label>URL do agente</label>
+      <input type="text" id="f-agent" placeholder="http://100.x.y.z:8765">
+      <div class="hint">Gerado pelo <code>agent.py</code> no PC. Veja <b>COMO-USAR.txt</b>.</div>
+      <div class="row"><button class="pri" id="b-saveagent"><svg class="ico"><use href="#i-check"/></svg>Salvar</button></div>
+    </div>
+    <div class="card">
+      <h3><svg class="ico"><use href="#i-user"/></svg>Conta Puter (lista 1)</h3>
+      <p>Login gratuito no navegador. Cada pessoa usa a própria conta.</p>
+      <div class="row">
+        <button id="b-login"><svg class="ico"><use href="#i-user"/></svg>Entrar no Puter</button>
+        <button id="b-who" class="ghost">Ver conta</button>
+      </div>
+      <div class="hint" id="s-who"></div>
+    </div>
+  </div></section>
+</main>
+
+<script src="https://js.puter.com/v2/"></script>
+<script src="core.js"></script>
+<script src="vault.js"></script>
+<script src="auth.js"></script>
+<script src="sync.js"></script>
+<script src="pilot.js"></script>
+  <script src="skills.js"></script>
+<script src="app.js"></script>
+<script src="ui.js"></script>
+</body>
+</html>

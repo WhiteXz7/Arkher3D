@@ -1,0 +1,195 @@
+name: ARKHER Sandbox
+
+on:
+  workflow_dispatch:
+  # REDE DE SEGURANCA: se a religacao falhar, o cron sobe de novo
+  schedule:
+    - cron: '0 */5 * * *'
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: arkher-sandbox
+  cancel-in-progress: false
+
+jobs:
+  sandbox:
+    # MESMA VM do workflow que voce mandou: AMD EPYC / 16GB / Windows
+    runs-on: windows-latest
+    timeout-minutes: 350          # 5h50 — sai ANTES do corte seco de 6h
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---------- 1. volta o estado da sessao anterior ----------
+      - name: Restaurar estado
+        uses: actions/cache/restore@v4
+        with:
+          path: arkher_state
+          key: nexus-state-${{ github.run_id }}
+          restore-keys: nexus-state-
+
+      - name: Preparar
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path arkher_state\work | Out-Null
+          if (Test-Path arkher_state\SNAPSHOT.json) {
+            Write-Host "=== estado anterior restaurado ==="
+            Get-Content arkher_state\SNAPSHOT.json
+          } else { Write-Host "primeira sessao" }
+          Write-Host "`n=== esta maquina ==="
+          (Get-CimInstance Win32_Processor).Name
+          "RAM: {0} GB" -f [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1GB,1)
+          "Disco livre: {0} GB" -f [math]::Round((Get-PSDrive C).Free/1GB,1)
+
+      # ---------- 2. acesso remoto ----------
+      - name: Liberar RDP e a porta do agente
+        shell: pwsh
+        run: |
+          Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server' fDenyTSConnections 0 -Force
+          Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' UserAuthentication 0 -Force
+          Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' SecurityLayer 0 -Force
+          netsh advfirewall firewall delete rule name="RDP-TS"      2>$null | Out-Null
+          netsh advfirewall firewall delete rule name="NEXUS-AGENT" 2>$null | Out-Null
+          netsh advfirewall firewall add rule name="RDP-TS"      dir=in action=allow protocol=TCP localport=3389
+          netsh advfirewall firewall add rule name="NEXUS-AGENT" dir=in action=allow protocol=TCP localport=8765
+          Restart-Service TermService -Force
+
+      - name: Usuario do RDP
+        shell: pwsh
+        run: |
+          $cs=@{U=[char[]](65..90);L=[char[]](97..122);N=[char[]](48..57)}
+          $r=@(); $r+=$cs.U|Get-Random -Count 5; $r+=$cs.L|Get-Random -Count 5; $r+=$cs.N|Get-Random -Count 4
+          $pw=-join ($r|Sort-Object{Get-Random})
+          $sec=ConvertTo-SecureString $pw -AsPlainText -Force
+          New-LocalUser -Name "nexus" -Password $sec -AccountNeverExpires -ErrorAction SilentlyContinue | Out-Null
+          Add-LocalGroupMember -Group "Administrators" -Member "nexus" -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "nexus" -ErrorAction SilentlyContinue
+          echo "RDP_PW=$pw" >> $env:GITHUB_ENV
+
+      - name: Tailscale
+        shell: pwsh
+        run: |
+          $p="$env:TEMP\ts.msi"
+          Invoke-WebRequest "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" -OutFile $p
+          Start-Process msiexec.exe -ArgumentList "/i","`"$p`"","/quiet","/norestart" -Wait
+          Remove-Item $p -Force
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
+            --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=nexus-sandbox
+          $ip=$null;$n=0
+          while(-not $ip -and $n -lt 12){ $ip=& "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4; Start-Sleep 5; $n++ }
+          if(-not $ip){ Write-Error "Tailscale sem IP"; exit 1 }
+          echo "TS_IP=$ip" >> $env:GITHUB_ENV
+
+      # ---------- 3. programas nativos (o ganho do Windows) ----------
+      - name: Instalar Blender, ffmpeg, git
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          choco install -y blender ffmpeg git 7zip --no-progress --limit-output
+          Write-Host "instalados"
+
+      - name: Instalar Roblox Studio
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          # Studio instala sem login; abrir arquivo .rbxl exige conta.
+          try {
+            Invoke-WebRequest "https://setup.rbxcdn.com/RobloxStudioLauncherBeta.exe" `
+              -OutFile "$env:TEMP\studio.exe" -UseBasicParsing
+            Start-Process "$env:TEMP\studio.exe" -ArgumentList "/S" -Wait -ErrorAction SilentlyContinue
+            Write-Host "Studio: instalador executado"
+          } catch { Write-Host "Studio nao instalou: $_" }
+
+
+      # ---------- SESSAO GRAFICA (sem isso o print sai preto) ----------
+      - name: Ativar sessao grafica para o Piloto
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          # autologon do usuario nexus: cria sessao de console de verdade
+          $k='HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+          Set-ItemProperty $k AutoAdminLogon 1 -Force
+          Set-ItemProperty $k DefaultUserName "nexus" -Force
+          Set-ItemProperty $k DefaultPassword "$env:RDP_PW" -Force
+          # nunca dormir / nunca bloquear a tela
+          powercfg /change monitor-timeout-ac 0
+          powercfg /change standby-timeout-ac 0
+          Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization' NoLockScreen 1 -Force -ErrorAction SilentlyContinue
+          Write-Host "autologon armado — apos o 1o RDP rode: tscon 1 /dest:console"
+          quser 2>&1 | Out-String | Write-Host
+
+      # ---------- 4. o agente ----------
+      - name: Subir agente
+        shell: pwsh
+        run: |
+          $env:ARKHER_STATE="$PWD\arkher_state"
+          Start-Process python -ArgumentList "agent.py" -NoNewWindow
+          Start-Sleep 5
+          $h=Invoke-RestMethod "http://127.0.0.1:8765/health"
+          Write-Host "agente OK — $($h.cpu) | $($h.ram_gb) GB | $($h.cpu_count) nucleos"
+
+      - name: COMO ACESSAR
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "=============== ARKHER PRONTO ==============="
+          Write-Host "  Cole na web UI (Config > URL do agente):"
+          Write-Host "      http://$env:TS_IP`:8765"
+          Write-Host ""
+          Write-Host "  RDP (ver a tela):  $env:TS_IP"
+          Write-Host "      usuario: nexus    senha: $env:RDP_PW"
+          Write-Host "============================================"
+          Write-Host ""
+
+      # ---------- 5. fica vivo e salva de tempos em tempos ----------
+      - name: Manter vivo
+        shell: pwsh
+        run: |
+          $fim=(Get-Date).AddMinutes(338)
+          while((Get-Date) -lt $fim){
+            Start-Sleep 300
+            try { Invoke-RestMethod "http://127.0.0.1:8765/snapshot" -Method Post -Body '{}' -ContentType 'application/json' | Out-Null } catch {}
+            Write-Host "[$(Get-Date -Format HH:mm)] vivo · http://$env:TS_IP`:8765"
+          }
+          Write-Host "tempo esgotado — salvando"
+
+      # ---------- 6. SALVA TUDO (roda mesmo se algo falhar) ----------
+      - name: Snapshot final
+        if: always()
+        shell: pwsh
+        run: |
+          try { Invoke-RestMethod "http://127.0.0.1:8765/snapshot" -Method Post -Body '{}' -ContentType 'application/json' | Out-Null } catch {}
+          Write-Host "estado salvo:"
+          Get-ChildItem arkher_state -Recurse | Select-Object FullName,Length | Format-Table
+
+      - name: Guardar estado
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: arkher_state
+          key: nexus-state-${{ github.run_id }}
+
+      # ---------- 7. RELIGA SOZINHO ----------
+      - name: Religar
+        if: always()
+        shell: pwsh
+        run: |
+          $tk = "${{ secrets.PAT_TOKEN }}"
+          if (-not $tk) { $tk = "${{ secrets.GITHUB_TOKEN }}" }
+          $h = @{ Authorization="Bearer $tk"; Accept="application/vnd.github+json";
+                  "X-GitHub-Api-Version"="2022-11-28" }
+          $u = "https://api.github.com/repos/${{ github.repository }}/actions/workflows/arkher.yml/dispatches"
+          $body = @{ ref="${{ github.ref_name }}" } | ConvertTo-Json
+          for ($i=1; $i -le 3; $i++) {
+            try {
+              Invoke-RestMethod -Uri $u -Method Post -Headers $h -Body $body -ContentType 'application/json'
+              Write-Host "proxima sessao disparada (tentativa $i)"
+              break
+            } catch {
+              Write-Host "tentativa $i falhou: $($_.Exception.Message)"
+              Start-Sleep 10
+            }
+          }
