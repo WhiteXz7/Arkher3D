@@ -103,6 +103,24 @@ jobs:
             Write-Host "Studio: instalador executado"
           } catch { Write-Host "Studio nao instalou: $_" }
 
+
+      # ---------- SESSAO GRAFICA (sem isso o print sai preto) ----------
+      - name: Ativar sessao grafica para o Piloto
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          # autologon do usuario nexus: cria sessao de console de verdade
+          $k='HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+          Set-ItemProperty $k AutoAdminLogon 1 -Force
+          Set-ItemProperty $k DefaultUserName "nexus" -Force
+          Set-ItemProperty $k DefaultPassword "$env:RDP_PW" -Force
+          # nunca dormir / nunca bloquear a tela
+          powercfg /change monitor-timeout-ac 0
+          powercfg /change standby-timeout-ac 0
+          Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization' NoLockScreen 1 -Force -ErrorAction SilentlyContinue
+          Write-Host "autologon armado — apos o 1o RDP rode: tscon 1 /dest:console"
+          quser 2>&1 | Out-String | Write-Host
+
       # ---------- 4. o agente ----------
       - name: Subir agente
         shell: pwsh
